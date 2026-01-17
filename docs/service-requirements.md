@@ -1,9 +1,19 @@
 # Payment Processing Service
 ## Requirements and Project Document
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Last Updated:** January 2026  
 **Project Type:** Learning Project / Portfolio Piece
+
+---
+
+## Revision History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | Dec 2025 | Initial requirements |
+| 1.1 | Jan 2026 | Added production-grade patterns (Intent/Method separation, transactional outbox, clearing accounts) |
+| 1.2 | Jan 2026 | Added multi-provider adapter architecture, canonical event model |
 
 ---
 
@@ -32,7 +42,9 @@
 
 This project involves building a Payment Processing Service that demonstrates production-grade patterns derived from industry leaders including Stripe, Square/Block, and Adyen. The system combines intelligent payment retry logic with core banking transaction patterns relevant to credit unions and financial institutions.
 
-The fundamental architectural insight driving this design: **payments are promises about money movement, not money movement itself**. Every design decision flows from understanding the distinction between authorization (the promise) and settlement (the actual transfer).
+**Fundamental Architectural Insight:** Payments are promises about money movement, not money movement itself. Every design decision flows from understanding the distinction between authorization (the promise) and settlement (the actual transfer).
+
+**Multi-Provider Design:** The system ingests webhooks from multiple third-party payment providers (Stripe, Adyen, PayPal, etc.), normalizes them to a canonical model at the edge, and processes all payments through a unified workflow engine. Provider-specific logic exists only at system boundaries.
 
 The service handles the complete payment lifecycle: intent creation, authorization, capture, recovery from failures, and settlement recording. It supports multiple payment types (card, ACH, internal transfers) and implements intelligent retry scheduling for recoverable failures.
 
@@ -43,9 +55,10 @@ The service handles the complete payment lifecycle: intent creation, authorizati
 | **Language** | Golang | Performance, strong typing, excellent concurrency support |
 | **Workflow Engine** | Temporal | Durable execution, built-in retry handling, workflow state persistence |
 | **Primary Database** | PostgreSQL | ACID compliance, robust for financial data, CDC support via logical replication |
+| **Connection Pooler** | PgBouncer | Transaction pooling mode, reduces connection overhead |
 | **Event Streaming** | Kafka with Debezium CDC | Transactional outbox pattern, schema registry support, event replay capability |
 | **Schema Registry** | Confluent Schema Registry | Avro schemas with backward compatibility enforcement |
-| **Payment Processor** | Stripe (test mode) | Industry-standard API, excellent documentation |
+| **Payment Processors** | Stripe, Adyen, PayPal (test mode) | Industry-standard APIs, demonstrate multi-provider support |
 | **API Framework** | Echo or Fiber | Lightweight, high-performance HTTP routing |
 | **Containerization** | Docker Compose | Local development environment |
 
@@ -61,6 +74,7 @@ These principles are derived from studying production payment systems at scale:
 | **Transactional Outbox** | Never dual-write to database and message broker |
 | **Linear State Machines** | Avoid circular states; new attempts are new records |
 | **Clearing Account Monitoring** | Non-zero clearing balances indicate unresolved issues |
+| **Normalize at the Edge** | Provider-specific logic lives in adapters; core system speaks canonical model |
 
 ### 1.4 Target Audience
 
@@ -84,6 +98,7 @@ Payment failures represent a significant challenge for businesses relying on rec
 - Traditional retry systems use static schedules ignoring failure type nuances
 - Financial institutions process millions of transactions requiring robust, auditable systems
 - Race conditions between webhooks and API responses cause duplicate charges in poorly designed systems
+- **Multi-provider complexity**: Each payment processor uses different schemas, event types, decline codes, and authentication methods
 
 ### 2.2 Industry Background
 
@@ -94,6 +109,18 @@ Stripe processes over 5 million queries per second using 5,000+ collections acro
 Square's Books ledger service manages approximately 20TB of data with a three-person team using Google Cloud Spanner, demonstrating how proper architecture reduces operational burden.
 
 Adyen's stateless PAL (Payments Acceptance Layer) allows any instance to handle any payment without routing constraints, achieving linear scaling.
+
+**Multi-Provider Reality:**
+
+Modern payment systems rarely use a single provider:
+
+| Reason | Example |
+|--------|---------|
+| Geographic coverage | Adyen for EU, Stripe for US |
+| Cost optimization | Route based on interchange rates |
+| Redundancy | Failover if primary provider is down |
+| Feature requirements | PayPal for buyer protection, Stripe for subscriptions |
+| Legacy integration | Existing contracts with specific providers |
 
 **Butter Payments Approach:**
 
@@ -127,7 +154,7 @@ Financial institutions like Vancity require:
 
 1. **Demonstrate Temporal Mastery**
    - Implement long-running workflows spanning hours or days
-   - Use signals for external event handling
+   - Use signals for external event handling (including provider webhooks)
    - Implement queries for workflow state inspection
    - Configure activity retry policies with proper error classification
 
@@ -137,13 +164,19 @@ Financial institutions like Vancity require:
    - Proper decline classification with 2,000+ code support
    - Double-entry bookkeeping with clearing account monitoring
 
-3. **Build Production-Grade Patterns**
+3. **Build Multi-Provider Architecture**
+   - Provider-specific adapters for webhook ingestion
+   - Canonical event model for internal processing
+   - Unified decline code normalization across providers
+   - Provider-agnostic workflow logic
+
+4. **Build Production-Grade Patterns**
    - Transactional outbox with CDC for reliable event publishing
    - Idempotency with atomic phases and recovery points
    - Race condition prevention for webhook/API concurrent processing
    - Linear state machines with attempt tracking
 
-4. **Create Portfolio-Ready Deliverable**
+5. **Create Portfolio-Ready Deliverable**
    - Well-documented codebase
    - Working local development environment
    - Comprehensive test coverage
@@ -155,6 +188,7 @@ Financial institutions like Vancity require:
 |-----------|-------------------|
 | Temporal workflow development | Distributed systems, durable execution |
 | Payment domain modeling | Financial services knowledge, industry patterns |
+| Multi-provider integration | Adapter pattern, schema normalization |
 | Event-driven architecture | Transactional outbox, CDC, schema evolution |
 | API design | REST best practices, idempotency |
 | Database schema design | Double-entry bookkeeping, audit trails |
@@ -170,6 +204,7 @@ Financial institutions like Vancity require:
 - Multi-currency support beyond USD
 - International payment regulations
 - PCI DSS compliance infrastructure
+- Smart routing between providers (single provider per payment)
 
 ---
 
@@ -177,36 +212,55 @@ Financial institutions like Vancity require:
 
 ### 4.1 Core Domain Concepts
 
-The domain model separates concerns to support diverse payment methods without architectural rewrites:
+The domain model separates concerns to support diverse payment methods and providers without architectural rewrites:
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         DOMAIN MODEL                                │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐ │
-│  │  PaymentIntent  │    │  PaymentMethod  │    │     Order       │ │
-│  │                 │    │                 │    │                 │ │
-│  │  WHAT is paid   │    │  HOW it's paid  │    │ WHAT's purchased│ │
-│  │                 │    │                 │    │                 │ │
-│  │  - Amount       │    │  - Card token   │    │  - Line items   │ │
-│  │  - Currency     │    │  - Bank account │    │  - Merchant     │ │
-│  │  - Customer     │    │  - Wallet       │    │  - Invoice ref  │ │
-│  │  - State        │    │  - Type/Network │    │  - Metadata     │ │
-│  └────────┬────────┘    └────────┬────────┘    └────────┬────────┘ │
-│           │                      │                      │          │
-│           └──────────────────────┼──────────────────────┘          │
-│                                  │                                  │
-│                                  ▼                                  │
-│                    ┌─────────────────────────┐                     │
-│                    │   PaymentTransaction    │                     │
-│                    │                         │                     │
-│                    │   Links Intent + Method │                     │
-│                    │   Tracks Attempts       │                     │
-│                    │   Records Auth/Capture  │                     │
-│                    └─────────────────────────┘                     │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              DOMAIN MODEL                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐         │
+│  │  PaymentIntent  │    │  PaymentMethod  │    │     Order       │         │
+│  │                 │    │                 │    │                 │         │
+│  │  WHAT is paid   │    │  HOW it's paid  │    │ WHAT's purchased│         │
+│  │                 │    │                 │    │                 │         │
+│  │  - Amount       │    │  - Card token   │    │  - Line items   │         │
+│  │  - Currency     │    │  - Bank account │    │  - Merchant     │         │
+│  │  - Customer     │    │  - Wallet       │    │  - Invoice ref  │         │
+│  │  - Provider     │    │  - Type/Network │    │  - Metadata     │         │
+│  │  - State        │    │  - Provider     │    │                 │         │
+│  └────────┬────────┘    └────────┬────────┘    └────────┬────────┘         │
+│           │                      │                      │                   │
+│           └──────────────────────┼──────────────────────┘                   │
+│                                  │                                          │
+│                                  ▼                                          │
+│                    ┌─────────────────────────┐                              │
+│                    │   PaymentTransaction    │                              │
+│                    │                         │                              │
+│                    │   Links Intent + Method │                              │
+│                    │   Tracks Attempts       │                              │
+│                    │   Records Auth/Capture  │                              │
+│                    │   Provider-Agnostic     │                              │
+│                    └─────────────────────────┘                              │
+│                                                                             │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                      CANONICAL EVENT MODEL                            │  │
+│  │                                                                       │  │
+│  │  All provider webhooks are normalized to this model before entering  │  │
+│  │  the workflow engine. The core system never sees provider-specific   │  │
+│  │  terminology.                                                         │  │
+│  │                                                                       │  │
+│  │  CanonicalPaymentEvent:                                               │  │
+│  │    - EventType (AUTHORIZATION_SUCCEEDED, CAPTURE_FAILED, etc.)       │  │
+│  │    - PaymentID (internal)                                            │  │
+│  │    - ProviderPaymentID (external)                                    │  │
+│  │    - Provider (STRIPE, ADYEN, PAYPAL)                                │  │
+│  │    - Amount, Currency                                                 │  │
+│  │    - Status, FailureCode (normalized)                                │  │
+│  │    - RawPayload (preserved for debugging)                            │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 4.2 Payment Lifecycle
@@ -232,6 +286,7 @@ Authorization holds are first-class entities, not implicit states:
 | **Expiration** | When the hold expires (5-30 days by network) |
 | **Status** | ACTIVE, CAPTURED, VOIDED, EXPIRED |
 | **Capture Window** | Time remaining to capture |
+| **Provider** | Which PSP holds the authorization |
 
 ### 4.4 Balance Model
 
@@ -243,6 +298,31 @@ Accounts maintain multiple balance states for accuracy:
 | **Pending Balance** | Authorized but unsettled amounts | Active holds sum |
 | **Available Balance** | Funds available for new transactions | Ledger - Pending debits |
 | **Reserved Balance** | Funds reserved for scheduled payments | Scheduled payment sum |
+
+### 4.5 Multi-Provider Canonical Model
+
+The canonical event model abstracts provider differences:
+
+**Canonical Event Types:**
+
+| Canonical Type | Stripe Event | Adyen Notification | PayPal Event |
+|----------------|--------------|-------------------|--------------|
+| AUTHORIZATION_SUCCEEDED | payment_intent.succeeded | AUTHORISATION (success=true) | PAYMENT.AUTHORIZATION.CREATED |
+| AUTHORIZATION_FAILED | payment_intent.payment_failed | AUTHORISATION (success=false) | PAYMENT.AUTHORIZATION.VOIDED |
+| CAPTURE_SUCCEEDED | charge.captured | CAPTURE | PAYMENT.CAPTURE.COMPLETED |
+| CAPTURE_FAILED | charge.failed | CAPTURE_FAILED | PAYMENT.CAPTURE.DENIED |
+| REFUND_SUCCEEDED | charge.refunded | REFUND | PAYMENT.CAPTURE.REFUNDED |
+| DISPUTE_OPENED | charge.dispute.created | CHARGEBACK | CUSTOMER.DISPUTE.CREATED |
+
+**Canonical Decline Codes:**
+
+| Canonical Code | Stripe | Adyen | PayPal |
+|----------------|--------|-------|--------|
+| INSUFFICIENT_FUNDS | insufficient_funds | Refused:51 | INSUFFICIENT_FUNDS |
+| CARD_EXPIRED | expired_card | Refused:33 | CREDIT_CARD_EXPIRED |
+| FRAUD_SUSPICION | fraudulent | Refused:59 | TRANSACTION_REFUSED |
+| GENERIC_DECLINE | card_declined | Refused:05 | INSTRUMENT_DECLINED |
+| DO_NOT_HONOR | do_not_honor | Refused:57 | DO_NOT_HONOR |
 
 ---
 
@@ -259,6 +339,7 @@ Accounts maintain multiple balance states for accuracy:
 | FR-INT-05 | System shall support payment intent cancellation before capture | Must Have |
 | FR-INT-06 | System shall use idempotency keys with atomic phases | Must Have |
 | FR-INT-07 | System shall support attaching metadata to payment intents | Should Have |
+| FR-INT-08 | Payment intent shall specify which provider to use | Must Have |
 
 ### 5.2 Authorization and Capture
 
@@ -271,21 +352,44 @@ Accounts maintain multiple balance states for accuracy:
 | FR-AUTH-05 | System shall track authorization expiration windows | Should Have |
 | FR-AUTH-06 | System shall support partial capture (less than authorized) | Should Have |
 | FR-AUTH-07 | System shall support void of uncaptured authorizations | Should Have |
+| FR-AUTH-08 | System shall use provider-specific activities for PSP calls | Must Have |
 
-### 5.3 Decline Handling and Recovery
+### 5.3 Multi-Provider Adapter Layer
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-ADP-01 | System shall provide dedicated webhook endpoints per provider | Must Have |
+| FR-ADP-02 | Each adapter shall verify provider-specific signatures/authentication | Must Have |
+| FR-ADP-03 | Adapters shall normalize events to canonical model before processing | Must Have |
+| FR-ADP-04 | Adapters shall preserve raw webhook payload for debugging | Must Have |
+| FR-ADP-05 | Adapters shall map provider decline codes to canonical codes | Must Have |
+| FR-ADP-06 | Adapters shall map provider event types to canonical event types | Must Have |
+| FR-ADP-07 | Adapter failures shall return appropriate HTTP status to provider | Must Have |
+| FR-ADP-08 | System shall support adding new providers without core changes | Should Have |
+
+**Provider-Specific Verification Requirements:**
+
+| Provider | Verification Method | Requirement |
+|----------|-------------------|-------------|
+| Stripe | Webhook signature with timestamp | Verify within 5 minutes of timestamp |
+| Adyen | HMAC-SHA256 | Verify using shared secret |
+| PayPal | Webhook ID verification API | Call PayPal to verify authenticity |
+
+### 5.4 Decline Handling and Recovery
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-DEC-01 | System shall classify declines into categories | Must Have |
-| FR-DEC-02 | System shall maintain a decline code mapping table (2,000+ codes) | Must Have |
-| FR-DEC-03 | System shall automatically retry soft declines with intelligent timing | Must Have |
-| FR-DEC-04 | System shall not retry hard declines or fraud flags | Must Have |
-| FR-DEC-05 | System shall create new attempt records for each retry (linear state machine) | Must Have |
-| FR-DEC-06 | System shall limit retry attempts to configurable maximum (default: 6) | Must Have |
-| FR-DEC-07 | System shall align retry timing with paydays for insufficient funds | Should Have |
-| FR-DEC-08 | System shall support immediate retry when payment method updated | Should Have |
+| FR-DEC-02 | System shall maintain decline code mapping per provider | Must Have |
+| FR-DEC-03 | System shall normalize provider codes to canonical codes | Must Have |
+| FR-DEC-04 | System shall automatically retry soft declines with intelligent timing | Must Have |
+| FR-DEC-05 | System shall not retry hard declines or fraud flags | Must Have |
+| FR-DEC-06 | System shall create new attempt records for each retry (linear state machine) | Must Have |
+| FR-DEC-07 | System shall limit retry attempts to configurable maximum (default: 6) | Must Have |
+| FR-DEC-08 | System shall align retry timing with paydays for insufficient funds | Should Have |
+| FR-DEC-09 | System shall support immediate retry when payment method updated | Should Have |
 
-### 5.4 Ledger and Bookkeeping
+### 5.5 Ledger and Bookkeeping
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
@@ -298,18 +402,19 @@ Accounts maintain multiple balance states for accuracy:
 | FR-LED-07 | System shall support balance reconciliation queries | Should Have |
 | FR-LED-08 | System shall enforce daily transaction limits when configured | Should Have |
 
-### 5.5 Event Publishing
+### 5.6 Event Publishing
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-EVT-01 | System shall use transactional outbox pattern for event publishing | Must Have |
 | FR-EVT-02 | System shall never dual-write to database and message broker | Must Have |
 | FR-EVT-03 | System shall use CDC (Debezium) to relay outbox events to Kafka | Must Have |
-| FR-EVT-04 | System shall use Avro schemas with backward compatibility | Should Have |
-| FR-EVT-05 | System shall support event replay for consumer recovery | Should Have |
-| FR-EVT-06 | Event consumers shall be idempotent (track processed message IDs) | Must Have |
+| FR-EVT-04 | System shall publish canonical events (not provider-specific) | Must Have |
+| FR-EVT-05 | System shall use Avro schemas with backward compatibility | Should Have |
+| FR-EVT-06 | System shall support event replay for consumer recovery | Should Have |
+| FR-EVT-07 | Event consumers shall be idempotent (track processed message IDs) | Must Have |
 
-### 5.6 Concurrency and Race Conditions
+### 5.7 Concurrency and Race Conditions
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
@@ -317,8 +422,9 @@ Accounts maintain multiple balance states for accuracy:
 | FR-CON-02 | System shall use SELECT FOR UPDATE when processing payment updates | Must Have |
 | FR-CON-03 | System shall use optimistic locking with version columns for balances | Must Have |
 | FR-CON-04 | System shall prevent duplicate charges from concurrent processing | Must Have |
+| FR-CON-05 | System shall handle provider webhook retries idempotently | Must Have |
 
-### 5.7 Scheduled Payments
+### 5.8 Scheduled Payments
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
@@ -328,7 +434,7 @@ Accounts maintain multiple balance states for accuracy:
 | FR-SCH-04 | System shall support cancellation of scheduled payments | Should Have |
 | FR-SCH-05 | System shall reserve balance for upcoming scheduled payments | Nice to Have |
 
-### 5.8 Audit and Compliance
+### 5.9 Audit and Compliance
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
@@ -338,6 +444,7 @@ Accounts maintain multiple balance states for accuracy:
 | FR-AUD-04 | System shall timestamp all audit entries with microsecond precision | Must Have |
 | FR-AUD-05 | System shall support audit log querying by entity, actor, or time range | Should Have |
 | FR-AUD-06 | Audit log shall be append-only (no updates or deletes) | Must Have |
+| FR-AUD-07 | System shall log provider and correlation IDs for webhook tracing | Must Have |
 
 ---
 
@@ -353,6 +460,7 @@ Accounts maintain multiple balance states for accuracy:
 | NFR-PERF-04 | Concurrent payment processing capacity | 100+ simultaneous workflows |
 | NFR-PERF-05 | CDC event latency (DB to Kafka) | < 100ms (p95) |
 | NFR-PERF-06 | Ledger entry creation latency | < 50ms (p95) |
+| NFR-PERF-07 | Webhook processing (signature verify + normalize) | < 50ms (p95) |
 
 ### 6.2 Reliability
 
@@ -364,6 +472,7 @@ Accounts maintain multiple balance states for accuracy:
 | NFR-REL-04 | Workflow state durability | Survives any single component failure |
 | NFR-REL-05 | Event delivery guarantee | At-least-once with idempotent consumers |
 | NFR-REL-06 | Zero data loss on component failure | Required |
+| NFR-REL-07 | Webhook delivery acknowledgment to providers | Return 200 only after safe processing |
 
 ### 6.3 Scalability
 
@@ -373,16 +482,19 @@ Accounts maintain multiple balance states for accuracy:
 | NFR-SCA-02 | Database connection pooling | PgBouncer in transaction mode |
 | NFR-SCA-03 | Stateless API servers | Multiple instances behind load balancer |
 | NFR-SCA-04 | Kafka partition scaling | Support partition increase without rebalance issues |
+| NFR-SCA-05 | Per-provider webhook scaling | Each adapter can scale independently |
 
 ### 6.4 Maintainability
 
 | ID | Requirement | Description |
 |----|-------------|-------------|
 | NFR-MNT-01 | Code documentation | Public functions documented with comments |
-| NFR-MNT-02 | Test coverage | Minimum 70% coverage on workflow and activity code |
-| NFR-MNT-03 | Configuration externalization | All environment-specific values via config |
-| NFR-MNT-04 | Structured logging | JSON-formatted logs with correlation IDs |
-| NFR-MNT-05 | Schema evolution | Backward-compatible Avro schema changes only |
+| NFR-MNT-02 | Test coverage (workflow code) | Minimum 70% coverage |
+| NFR-MNT-03 | Test coverage (adapter code) | Minimum 80% coverage |
+| NFR-MNT-04 | Configuration externalization | All environment-specific values via config |
+| NFR-MNT-05 | Structured logging | JSON-formatted logs with correlation IDs |
+| NFR-MNT-06 | Schema evolution | Backward-compatible Avro schema changes only |
+| NFR-MNT-07 | Provider isolation | Adding new provider requires no core changes |
 
 ### 6.5 Security
 
@@ -390,9 +502,10 @@ Accounts maintain multiple balance states for accuracy:
 |----|-------------|-------------|
 | NFR-SEC-01 | Sensitive data handling | No PCI data stored; use tokenized payment methods |
 | NFR-SEC-02 | Database credentials | Environment variables or Vault, never hardcoded |
-| NFR-SEC-03 | Webhook verification | Stripe webhook signature validation |
+| NFR-SEC-03 | Webhook verification | Provider-specific signature validation required |
 | NFR-SEC-04 | API key protection | Keys not logged or exposed in responses |
 | NFR-SEC-05 | Row-level locking | Prevent race conditions on balance updates |
+| NFR-SEC-06 | Provider secrets isolation | Each provider's credentials stored separately |
 
 ### 6.6 Observability
 
@@ -404,6 +517,7 @@ Accounts maintain multiple balance states for accuracy:
 | NFR-OBS-04 | Metrics exposure | Prometheus-compatible metrics |
 | NFR-OBS-05 | Clearing account monitoring | Alert on non-zero clearing balances |
 | NFR-OBS-06 | Latency percentile tracking | p50, p95, p99 for all operations |
+| NFR-OBS-07 | Per-provider metrics | Track success/failure rates by provider |
 
 ---
 
@@ -412,139 +526,242 @@ Accounts maintain multiple balance states for accuracy:
 ### 7.1 Component Overview
 
 ```
-┌───────────────────────────────────────────────────────────────────────────┐
-│                         Payment Processing Service                         │
-├───────────────────────────────────────────────────────────────────────────┤
-│                                                                           │
-│  ┌─────────────────────┐                                                  │
-│  │     API Server      │     ┌─────────────────────────────────────────┐  │
-│  │     (Stateless)     │────▶│         Temporal Workflows              │  │
-│  │                     │     │                                         │  │
-│  │  POST /intents      │     │  PaymentWorkflow                        │  │
-│  │  POST /intents/:id/ │     │    ├─ ValidateIntent                    │  │
-│  │       authorize     │     │    ├─ RequestAuthorization              │  │
-│  │  POST /intents/:id/ │     │    ├─ WaitForCapture (or immediate)     │  │
-│  │       capture       │     │    ├─ ProcessCapture                    │  │
-│  │  POST /webhooks     │     │    ├─ RecordLedgerEntries               │  │
-│  └─────────────────────┘     │    └─ WriteToOutbox                     │  │
-│                              │                                         │  │
-│  ┌─────────────────────┐     │  RecoveryWorkflow                       │  │
-│  │   Signal Handlers   │────▶│    ├─ ClassifyDecline                   │  │
-│  │                     │     │    ├─ CreateAttemptRecord               │  │
-│  │  - UpdateMethod     │     │    ├─ CalculateRetryTime                │  │
-│  │  - CancelIntent     │     │    ├─ DurableSleep                      │  │
-│  │  - ForceCapture     │     │    └─ RetryOrEscalate                   │  │
-│  └─────────────────────┘     │                                         │  │
-│                              │  ScheduledPaymentWorkflow               │  │
-│  ┌─────────────────────┐     │    ├─ WaitForScheduledTime              │  │
-│  │   Query Handlers    │◀────│    ├─ VerifyAccountStatus               │  │
-│  │                     │     │    └─ StartChildPaymentWorkflow         │  │
-│  │  - GetIntentStatus  │     └─────────────────────────────────────────┘  │
-│  │  - GetAttempts      │                                                  │
-│  │  - GetHoldStatus    │                                                  │
-│  └─────────────────────┘                                                  │
-│                                                                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                         Data Layer                                  │  │
-│  │                                                                     │  │
-│  │  PostgreSQL                           Kafka                         │  │
-│  │  ┌─────────────────────────────┐     ┌─────────────────────────┐   │  │
-│  │  │ payment_intents             │     │ payments.authorized     │   │  │
-│  │  │ authorization_holds         │     │ payments.captured       │   │  │
-│  │  │ payment_attempts            │     │ payments.failed         │   │  │
-│  │  │ ledger_entries              │     │ payments.recovering     │   │  │
-│  │  │ accounts (with balances)    │     │ accounts.updated        │   │  │
-│  │  │ clearing_accounts           │     │                         │   │  │
-│  │  │ outbox                      │────▶│ (via Debezium CDC)      │   │  │
-│  │  │ audit_log                   │     │                         │   │  │
-│  │  └─────────────────────────────┘     └─────────────────────────┘   │  │
-│  │                                                                     │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-│                                                                           │
-└───────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       Payment Processing Service                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                        ADAPTER LAYER                                   │  │
+│  │                   (Normalize at the Edge)                              │  │
+│  │                                                                        │  │
+│  │  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐                  │  │
+│  │  │   Stripe    │   │   Adyen     │   │   PayPal    │                  │  │
+│  │  │   Adapter   │   │   Adapter   │   │   Adapter   │                  │  │
+│  │  │             │   │             │   │             │                  │  │
+│  │  │ POST /wh/   │   │ POST /wh/   │   │ POST /wh/   │                  │  │
+│  │  │   stripe    │   │   adyen     │   │   paypal    │                  │  │
+│  │  │             │   │             │   │             │                  │  │
+│  │  │ - Verify    │   │ - Verify    │   │ - Verify    │                  │  │
+│  │  │   signature │   │   HMAC      │   │   via API   │                  │  │
+│  │  │ - Map events│   │ - Map events│   │ - Map events│                  │  │
+│  │  │ - Normalize │   │ - Normalize │   │ - Normalize │                  │  │
+│  │  └──────┬──────┘   └──────┬──────┘   └──────┬──────┘                  │  │
+│  │         │                 │                 │                          │  │
+│  │         └─────────────────┼─────────────────┘                          │  │
+│  │                           │                                            │  │
+│  │                           ▼                                            │  │
+│  │                 ┌───────────────────┐                                  │  │
+│  │                 │  Canonical Event  │                                  │  │
+│  │                 └───────────────────┘                                  │  │
+│  └───────────────────────────┼───────────────────────────────────────────┘  │
+│                              │                                              │
+│  ┌───────────────────────────┼───────────────────────────────────────────┐  │
+│  │                           ▼                                            │  │
+│  │  ┌─────────────────────┐                                              │  │
+│  │  │     API Server      │     ┌─────────────────────────────────────┐  │  │
+│  │  │     (Stateless)     │────▶│         Temporal Workflows          │  │  │
+│  │  │                     │     │                                     │  │  │
+│  │  │  POST /intents      │     │  PaymentWorkflow                    │  │  │
+│  │  │  POST /intents/:id/ │     │    ├─ ValidateIntent                │  │  │
+│  │  │       authorize     │     │    ├─ RequestAuthorization          │  │  │
+│  │  │  POST /intents/:id/ │     │    │   (provider-specific activity) │  │  │
+│  │  │       capture       │     │    ├─ WaitForCapture (or immediate) │  │  │
+│  │  │                     │     │    ├─ ProcessCapture                │  │  │
+│  │  └─────────────────────┘     │    │   (provider-specific activity) │  │  │
+│  │                              │    ├─ RecordLedgerEntries           │  │  │
+│  │  ┌─────────────────────┐     │    └─ WriteToOutbox                 │  │  │
+│  │  │   Signal Handlers   │────▶│                                     │  │  │
+│  │  │                     │     │  RecoveryWorkflow                   │  │  │
+│  │  │  - ProviderEvent    │     │    ├─ ClassifyDecline (canonical)   │  │  │
+│  │  │  - UpdateMethod     │     │    ├─ CreateAttemptRecord           │  │  │
+│  │  │  - CancelIntent     │     │    ├─ CalculateRetryTime            │  │  │
+│  │  │  - ForceCapture     │     │    ├─ DurableSleep                  │  │  │
+│  │  └─────────────────────┘     │    └─ RetryOrEscalate               │  │  │
+│  │                              │                                     │  │  │
+│  │  ┌─────────────────────┐     │  ScheduledPaymentWorkflow           │  │  │
+│  │  │   Query Handlers    │◀────│    ├─ WaitForScheduledTime          │  │  │
+│  │  │                     │     │    ├─ VerifyAccountStatus           │  │  │
+│  │  │  - GetIntentStatus  │     │    └─ StartChildPaymentWorkflow     │  │  │
+│  │  │  - GetAttempts      │     └─────────────────────────────────────┘  │  │
+│  │  │  - GetHoldStatus    │                                              │  │
+│  │  └─────────────────────┘                                              │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                         ACTIVITY LAYER                                 │  │
+│  │                                                                        │  │
+│  │  Provider-Specific Activities      Provider-Agnostic Activities       │  │
+│  │  ─────────────────────────────     ────────────────────────────       │  │
+│  │  StripeAuthorizationActivity       RecordLedgerActivity               │  │
+│  │  StripeCapureActivity              WriteOutboxActivity                │  │
+│  │  AdyenAuthorizationActivity        ClassifyDeclineActivity            │  │
+│  │  AdyenCaptureActivity              CheckAccountStatusActivity         │  │
+│  │  PayPalAuthorizationActivity       CalculateRetryTimeActivity         │  │
+│  │  PayPalCaptureActivity                                                │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                         DATA LAYER                                     │  │
+│  │                                                                        │  │
+│  │  PostgreSQL                           Kafka                            │  │
+│  │  ┌─────────────────────────────┐     ┌─────────────────────────┐      │  │
+│  │  │ payment_intents             │     │ payments.authorized     │      │  │
+│  │  │ authorization_holds         │     │ payments.captured       │      │  │
+│  │  │ payment_attempts            │     │ payments.failed         │      │  │
+│  │  │ ledger_entries              │     │ payments.recovering     │      │  │
+│  │  │ accounts (with balances)    │     │ accounts.updated        │      │  │
+│  │  │ clearing_accounts           │     │                         │      │  │
+│  │  │ outbox                      │────▶│ (via Debezium CDC)      │      │  │
+│  │  │ audit_log                   │     │                         │      │  │
+│  │  │ decline_code_mappings       │     │ (Canonical events only) │      │  │
+│  │  └─────────────────────────────┘     └─────────────────────────┘      │  │
+│  │                                                                        │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 7.2 Transactional Outbox Pattern
+### 7.2 Adapter Layer Detail
+
+The adapter layer normalizes all provider-specific data at the system boundary:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        ADAPTER LAYER DETAIL                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Stripe Webhook                                                            │
+│   POST /webhooks/stripe                                                     │
+│         │                                                                   │
+│         ▼                                                                   │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │                      StripeAdapter                                   │  │
+│   │                                                                      │  │
+│   │  1. Verify Signature                                                 │  │
+│   │     - Extract Stripe-Signature header                               │  │
+│   │     - Verify timestamp within tolerance (5 min)                     │  │
+│   │     - Validate HMAC-SHA256 signature                                │  │
+│   │     - Reject with 401 if invalid                                    │  │
+│   │                                                                      │  │
+│   │  2. Parse Event                                                      │  │
+│   │     - Unmarshal JSON to Stripe event struct                         │  │
+│   │     - Extract event type (e.g., "charge.succeeded")                 │  │
+│   │     - Extract relevant data from event object                       │  │
+│   │                                                                      │  │
+│   │  3. Map to Canonical                                                 │  │
+│   │     - "charge.succeeded" → CAPTURE_SUCCEEDED                        │  │
+│   │     - "insufficient_funds" → INSUFFICIENT_FUNDS                     │  │
+│   │     - Extract amount, currency, IDs                                 │  │
+│   │                                                                      │  │
+│   │  4. Preserve Raw Payload                                             │  │
+│   │     - Store original JSON for debugging                             │  │
+│   │     - Include provider timestamp                                    │  │
+│   │                                                                      │  │
+│   │  5. Signal Workflow or Start New                                     │  │
+│   │     - Look up workflow by provider payment ID                       │  │
+│   │     - Signal existing workflow with canonical event                 │  │
+│   │     - Return 200 to Stripe                                          │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│         │                                                                   │
+│         ▼                                                                   │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │                    CanonicalPaymentEvent                             │  │
+│   │                                                                      │  │
+│   │  {                                                                   │  │
+│   │    "event_type": "CAPTURE_SUCCEEDED",                               │  │
+│   │    "payment_id": "pay_abc123",                                      │  │
+│   │    "provider_payment_id": "ch_xyz789",                              │  │
+│   │    "provider": "STRIPE",                                            │  │
+│   │    "amount": 10000,                                                 │  │
+│   │    "currency": "USD",                                               │  │
+│   │    "status": "SUCCEEDED",                                           │  │
+│   │    "failure_code": null,                                            │  │
+│   │    "raw_payload": { ... },                                          │  │
+│   │    "received_at": "2026-01-17T10:30:00Z"                           │  │
+│   │  }                                                                   │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 7.3 Transactional Outbox Pattern
 
 The system never dual-writes to database and Kafka. All events flow through the outbox:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     TRANSACTIONAL OUTBOX PATTERN                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   Application                                                           │
-│       │                                                                 │
-│       ▼                                                                 │
-│   ┌─────────────────────────────────────────────────┐                  │
-│   │              Single Transaction                  │                  │
-│   │                                                  │                  │
-│   │   1. UPDATE payment_intents SET status = ...    │                  │
-│   │   2. INSERT INTO ledger_entries (...)           │                  │
-│   │   3. INSERT INTO outbox (event_type, payload)   │                  │
-│   │                                                  │                  │
-│   │   COMMIT                                         │                  │
-│   └─────────────────────────────────────────────────┘                  │
-│                           │                                             │
-│                           ▼                                             │
-│   ┌─────────────────────────────────────────────────┐                  │
-│   │           Debezium CDC Connector                 │                  │
-│   │                                                  │                  │
-│   │   - Reads PostgreSQL WAL (write-ahead log)      │                  │
-│   │   - Captures outbox table changes               │                  │
-│   │   - Publishes to Kafka topics                   │                  │
-│   │   - Maintains exactly-once semantics            │                  │
-│   └─────────────────────────────────────────────────┘                  │
-│                           │                                             │
-│                           ▼                                             │
-│   ┌─────────────────────────────────────────────────┐                  │
-│   │                 Kafka Topics                     │                  │
-│   │                                                  │                  │
-│   │   payments.authorized                           │                  │
-│   │   payments.captured                             │                  │
-│   │   payments.failed                               │                  │
-│   │                                                  │                  │
-│   └─────────────────────────────────────────────────┘                  │
-│                           │                                             │
-│                           ▼                                             │
-│   ┌─────────────────────────────────────────────────┐                  │
-│   │          Idempotent Consumers                    │                  │
-│   │                                                  │                  │
-│   │   - Track processed message IDs                 │                  │
-│   │   - Handle duplicates gracefully                │                  │
-│   │   - Analytics, notifications, reporting         │                  │
-│   └─────────────────────────────────────────────────┘                  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     TRANSACTIONAL OUTBOX PATTERN                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Application                                                               │
+│       │                                                                     │
+│       ▼                                                                     │
+│   ┌─────────────────────────────────────────────────┐                      │
+│   │              Single Transaction                  │                      │
+│   │                                                  │                      │
+│   │   1. UPDATE payment_intents SET status = ...    │                      │
+│   │   2. INSERT INTO ledger_entries (...)           │                      │
+│   │   3. INSERT INTO outbox (event_type, payload)   │                      │
+│   │      (Canonical event - no provider specifics)  │                      │
+│   │                                                  │                      │
+│   │   COMMIT                                         │                      │
+│   └─────────────────────────────────────────────────┘                      │
+│                           │                                                 │
+│                           ▼                                                 │
+│   ┌─────────────────────────────────────────────────┐                      │
+│   │           Debezium CDC Connector                 │                      │
+│   │                                                  │                      │
+│   │   - Reads PostgreSQL WAL (write-ahead log)      │                      │
+│   │   - Captures outbox table changes               │                      │
+│   │   - Publishes to Kafka topics                   │                      │
+│   │   - Maintains exactly-once semantics            │                      │
+│   └─────────────────────────────────────────────────┘                      │
+│                           │                                                 │
+│                           ▼                                                 │
+│   ┌─────────────────────────────────────────────────┐                      │
+│   │                 Kafka Topics                     │                      │
+│   │                                                  │                      │
+│   │   payments.authorized  (canonical events)       │                      │
+│   │   payments.captured    (canonical events)       │                      │
+│   │   payments.failed      (canonical events)       │                      │
+│   │                                                  │                      │
+│   └─────────────────────────────────────────────────┘                      │
+│                           │                                                 │
+│                           ▼                                                 │
+│   ┌─────────────────────────────────────────────────┐                      │
+│   │          Idempotent Consumers                    │                      │
+│   │                                                  │                      │
+│   │   - Track processed message IDs                 │                      │
+│   │   - Handle duplicates gracefully                │                      │
+│   │   - Analytics, notifications, reporting         │                      │
+│   │   - Consumers never see provider-specific data  │                      │
+│   └─────────────────────────────────────────────────┘                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 7.3 Payment Flow Sequence
+### 7.4 Payment Flow Sequence
 
-**Standard Authorization + Capture Flow:**
+**Inbound Flow (Provider Webhook):**
 
-1. Client creates PaymentIntent via `POST /api/v1/intents`
-2. Client attaches PaymentMethod via `PUT /api/v1/intents/:id/method`
-3. Client requests authorization via `POST /api/v1/intents/:id/authorize`
-4. Workflow executes authorization activity; processor returns approval or decline
-5. On approval: AuthorizationHold created, funds placed on hold
-6. Client requests capture via `POST /api/v1/intents/:id/capture` (or automatic)
-7. Workflow executes capture activity; processor confirms
-8. Ledger entries recorded atomically with outbox event
-9. CDC relays event to Kafka
-10. Workflow completes
+1. Provider sends webhook to `/webhooks/{provider}`
+2. Adapter verifies signature using provider-specific method
+3. Adapter parses event and maps to canonical model
+4. Adapter looks up existing workflow by provider payment ID
+5. Adapter signals workflow with canonical event
+6. Workflow processes event using provider-agnostic logic
+7. Return 200 to provider
 
-**Recovery Flow (Soft Decline):**
+**Outbound Flow (API-Initiated Payment):**
 
-1. Authorization or capture receives soft decline (e.g., insufficient_funds)
-2. Workflow classifies decline using code mapping table
-3. New PaymentAttempt record created (linear state machine)
-4. Retry delay calculated based on decline type and attempt number
-5. Workflow enters durable sleep with signal handling
-6. On wake: check for payment method update signal
-7. Create new PaymentAttempt, retry authorization
-8. Loop until success, hard decline, or attempt limit reached
+1. Client creates PaymentIntent via `POST /api/v1/intents` (specifies provider)
+2. Workflow starts, selects provider-specific authorization activity
+3. Activity calls provider API with idempotency key
+4. On success: Create hold, update balances, write outbox
+5. CDC relays canonical event to Kafka
+6. Client can poll for status or receive webhook
 
-### 7.4 Idempotency with Atomic Phases
+### 7.5 Idempotency with Atomic Phases
 
 Each operation is broken into phases with recovery points:
 
@@ -552,7 +769,7 @@ Each operation is broken into phases with recovery points:
 |-------|-------------|----------------|
 | **started** | Request received, idempotency key stored | Can restart from beginning |
 | **validated** | Input validation passed | Skip validation on retry |
-| **authorized** | Authorization received from processor | Skip authorization, use stored result |
+| **authorized** | Authorization received from provider | Skip authorization, use stored result |
 | **captured** | Capture confirmed | Skip capture, use stored result |
 | **ledger_updated** | Ledger entries written | Skip ledger update |
 | **event_written** | Outbox event written | Skip event write |
@@ -573,6 +790,8 @@ Each operation is broken into phases with recovery points:
 | currency | String(3) | ISO 4217 currency code |
 | status | Enum | CREATED, REQUIRES_METHOD, REQUIRES_AUTH, AUTHORIZED, CAPTURED, FAILED, CANCELLED |
 | capture_method | Enum | AUTOMATIC, MANUAL |
+| provider | Enum | STRIPE, ADYEN, PAYPAL |
+| provider_payment_id | String | Provider's payment/charge ID |
 | payment_method_id | UUID | Reference to attached payment method |
 | metadata | JSONB | Custom key-value data |
 | created_at | Timestamp | Intent creation time |
@@ -587,7 +806,8 @@ Each operation is broken into phases with recovery points:
 | amount | Decimal(19,4) | Authorized amount |
 | currency | String(3) | ISO 4217 currency code |
 | status | Enum | ACTIVE, CAPTURED, VOIDED, EXPIRED |
-| processor_auth_code | String | Processor's authorization code |
+| provider | Enum | STRIPE, ADYEN, PAYPAL |
+| processor_auth_code | String | Provider's authorization code |
 | expires_at | Timestamp | When the hold expires |
 | captured_amount | Decimal(19,4) | Amount captured (may be partial) |
 | captured_at | Timestamp | Capture timestamp |
@@ -601,10 +821,11 @@ Each operation is broken into phases with recovery points:
 | payment_intent_id | UUID | Parent payment intent |
 | attempt_number | Integer | Sequential attempt number |
 | status | Enum | PENDING, PROCESSING, SUCCEEDED, FAILED |
-| processor_response_code | String | Raw processor response code |
-| decline_code | String | Normalized decline code |
+| provider | Enum | STRIPE, ADYEN, PAYPAL |
+| provider_response_code | String | Raw provider response code |
+| canonical_decline_code | String | Normalized decline code |
 | decline_type | Enum | SOFT, HARD, FRAUD, TEMPORARY |
-| processor_transaction_id | String | Processor's transaction ID |
+| processor_txn_id | String | Provider's transaction ID |
 | idempotency_key | String | Attempt-specific idempotency key |
 | created_at | Timestamp | Attempt start time |
 | completed_at | Timestamp | Attempt completion time |
@@ -627,7 +848,34 @@ Each operation is broken into phases with recovery points:
 | created_at | Timestamp | Account creation time |
 | updated_at | Timestamp | Last balance update time |
 
-### 8.5 Clearing Accounts
+### 8.5 Decline Code Mapping Entity
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | UUID | Unique mapping identifier |
+| provider | Enum | STRIPE, ADYEN, PAYPAL |
+| provider_code | String | Raw provider decline code |
+| canonical_code | String | Normalized internal code |
+| decline_type | Enum | SOFT, HARD, FRAUD, TEMPORARY |
+| description | String | Human-readable description |
+| retry_eligible | Boolean | Whether retry is permitted |
+| suggested_action | String | Recommended customer action |
+
+### 8.6 Canonical Event Types
+
+| Event Type | Description |
+|------------|-------------|
+| AUTHORIZATION_SUCCEEDED | Authorization approved, hold placed |
+| AUTHORIZATION_FAILED | Authorization declined |
+| CAPTURE_SUCCEEDED | Capture confirmed |
+| CAPTURE_FAILED | Capture failed |
+| VOID_SUCCEEDED | Authorization voided |
+| REFUND_SUCCEEDED | Refund processed |
+| REFUND_FAILED | Refund failed |
+| DISPUTE_OPENED | Chargeback initiated |
+| DISPUTE_CLOSED | Dispute resolved |
+
+### 8.7 Clearing Accounts
 
 Clearing accounts track in-flight transactions for monitoring:
 
@@ -639,42 +887,6 @@ Clearing accounts track in-flight transactions for monitoring:
 
 **Monitoring Rule:** Non-zero clearing account balances exceeding 24 hours indicate unresolved issues requiring investigation.
 
-### 8.6 Ledger Entry Entity
-
-| Field | Type | Description |
-|-------|------|-------------|
-| id | UUID | Unique entry identifier |
-| journal_entry_id | UUID | Groups related debits/credits |
-| account_id | UUID | Affected account |
-| payment_intent_id | UUID | Associated payment (if applicable) |
-| entry_type | Enum | DEBIT, CREDIT |
-| amount | Decimal(19,4) | Entry amount (always positive) |
-| balance_after | Decimal(19,4) | Account balance after entry |
-| description | String | Human-readable description |
-| created_at | Timestamp | Entry creation time (immutable) |
-
-### 8.7 Outbox Entity
-
-| Field | Type | Description |
-|-------|------|-------------|
-| id | UUID | Unique outbox entry identifier |
-| aggregate_type | String | Entity type (e.g., "PaymentIntent") |
-| aggregate_id | UUID | Entity identifier |
-| event_type | String | Event type (e.g., "payment.captured") |
-| payload | JSONB | Event payload |
-| created_at | Timestamp | When event was written |
-
-### 8.8 Decline Code Mapping
-
-| Field | Type | Description |
-|-------|------|-------------|
-| processor_code | String | Raw processor decline code |
-| normalized_code | String | Normalized internal code |
-| decline_type | Enum | SOFT, HARD, FRAUD, TEMPORARY |
-| description | String | Human-readable description |
-| retry_eligible | Boolean | Whether retry is permitted |
-| suggested_action | String | Recommended customer action |
-
 ---
 
 ## 9. User Stories
@@ -682,10 +894,10 @@ Clearing accounts track in-flight transactions for monitoring:
 ### 9.1 Payment Intent Creation
 
 **US-01: Create a payment intent**
-> As an API consumer, I want to create a payment intent so that I can begin the payment process.
+> As an API consumer, I want to create a payment intent specifying the provider so that I can begin the payment process.
 
 Acceptance Criteria:
-- Payment intent created with amount, currency, and customer
+- Payment intent created with amount, currency, customer, and provider
 - Intent status is CREATED or REQUIRES_METHOD
 - Idempotency key prevents duplicate intents
 - Intent ID returned for subsequent operations
@@ -699,67 +911,37 @@ Acceptance Criteria:
 - Payment method can be updated until authorization
 - Invalid payment methods rejected with clear error
 
-### 9.2 Authorization and Capture
+### 9.2 Multi-Provider Webhooks
 
-**US-03: Authorize a payment**
-> As an API consumer, I want to authorize a payment so that funds are placed on hold.
-
-Acceptance Criteria:
-- Authorization request sent to payment processor
-- AuthorizationHold entity created on success
-- Account pending_balance updated
-- Decline classified and appropriate action taken
-- Authorization code returned for reference
-
-**US-04: Capture authorized funds**
-> As an API consumer, I want to capture authorized funds so that settlement is initiated.
+**US-03: Receive Stripe webhook**
+> As the system, I want to receive and process Stripe webhooks so that payment status is updated.
 
 Acceptance Criteria:
-- Capture request validates active authorization exists
-- Capture amount may be less than or equal to authorized
-- Ledger entries created atomically
-- Event written to outbox
-- AuthorizationHold status updated to CAPTURED
+- Stripe signature verified before processing
+- Event mapped to canonical model
+- Existing workflow signaled with canonical event
+- Return 200 to Stripe within timeout
+
+**US-04: Receive Adyen notification**
+> As the system, I want to receive and process Adyen notifications so that payment status is updated.
+
+Acceptance Criteria:
+- HMAC signature verified before processing
+- Notification mapped to canonical model
+- Existing workflow signaled with canonical event
+- Return "[accepted]" to Adyen
 
 ### 9.3 Decline Recovery
 
 **US-05: Automatic retry on soft decline**
-> As a business, I want failed payments automatically retried at intelligent times so that I recover more revenue.
+> As a business, I want failed payments automatically retried at intelligent times regardless of provider so that I recover more revenue.
 
 Acceptance Criteria:
-- Soft declines classified correctly
+- Provider decline codes mapped to canonical codes
+- Soft declines classified correctly using canonical code
 - New PaymentAttempt record created for each retry
-- Retry timing considers decline type
-- Insufficient funds aligned with paydays
+- Retry timing considers decline type (not provider)
 - Maximum attempts enforced
-
-**US-06: Update payment method during recovery**
-> As an API consumer, I want to update the payment method for a recovering payment so that the customer can provide a working card.
-
-Acceptance Criteria:
-- Signal received by recovering workflow
-- Next retry uses new payment method
-- New PaymentAttempt record created
-- Previous attempts preserved for audit
-
-### 9.4 Balance and Ledger
-
-**US-07: View account balances**
-> As an API consumer, I want to view all balance types so that I understand available funds.
-
-Acceptance Criteria:
-- Response includes ledger, pending, available, and reserved balances
-- Balances are consistent with ledger entries
-- Version number included for optimistic updates
-
-**US-08: View ledger history**
-> As an API consumer, I want to view ledger entries so that I can see transaction history.
-
-Acceptance Criteria:
-- Entries returned in chronological order
-- Each entry shows running balance
-- Entries link to originating payment
-- Pagination supported
 
 ---
 
@@ -782,44 +964,30 @@ Acceptance Criteria:
 | DELETE | /api/v1/scheduled/:id | Cancel schedule |
 | GET | /api/v1/accounts/:id | Get account with balances |
 | GET | /api/v1/accounts/:id/ledger | Get ledger entries |
-| POST | /api/v1/webhooks/stripe | Receive Stripe webhooks |
+| POST | /webhooks/stripe | Receive Stripe webhooks |
+| POST | /webhooks/adyen | Receive Adyen notifications |
+| POST | /webhooks/paypal | Receive PayPal webhooks |
 | GET | /health | Health check |
 | GET | /metrics | Prometheus metrics |
 
-### 10.2 Idempotency Key Header
+### 10.2 Create Intent Request
 
-All mutating endpoints require the `Idempotency-Key` header:
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| amount | string | Yes | Decimal amount (e.g., "100.00") |
+| currency | string | Yes | ISO 4217 code |
+| customer_id | string | Yes | Customer reference |
+| provider | string | Yes | STRIPE, ADYEN, or PAYPAL |
+| capture_method | string | No | "automatic" or "manual" |
+| payment_method_id | string | No | Pre-attach method |
+| metadata | object | No | Custom key-value pairs |
 
-| Header | Required | Format | Expiration |
-|--------|----------|--------|------------|
-| Idempotency-Key | Yes | UUID or client-generated string | 48 hours |
-
-Response behavior:
-- First request: Process normally, cache response
-- Duplicate while processing: Return 409 Conflict
-- Duplicate after completion: Return cached response
-- After expiration: Process as new request
-
-### 10.3 Payment Intent Response
-
-| Field | Type | Description |
-|-------|------|-------------|
-| id | String | Payment intent identifier |
-| status | String | Current status |
-| amount | String | Payment amount |
-| currency | String | Currency code |
-| capture_method | String | AUTOMATIC or MANUAL |
-| payment_method_id | String | Attached payment method |
-| authorization_hold | Object | Hold details (if authorized) |
-| latest_attempt | Object | Most recent attempt details |
-| created_at | String | ISO 8601 timestamp |
-| updated_at | String | ISO 8601 timestamp |
-
-### 10.4 Error Responses
+### 10.3 Error Responses
 
 | Status Code | Error Type | When Used |
 |-------------|------------|-----------|
 | 400 | validation_error | Invalid input format or values |
+| 401 | authentication_error | Invalid webhook signature |
 | 404 | not_found | Resource does not exist |
 | 409 | conflict | Idempotency conflict or invalid state transition |
 | 422 | business_rule_violation | Insufficient funds, limit exceeded |
@@ -834,35 +1002,51 @@ Response behavior:
 **Objectives:**
 - Establish project structure with domain model separation
 - Set up infrastructure with CDC pipeline
-- Implement core database schema
+- Implement core database schema including decline mappings
 
 **Deliverables:**
 - Go module with Intent/Method/Attempt separation
 - Docker Compose with Temporal, PostgreSQL, Kafka, Debezium
-- Database migrations including outbox table
+- Database migrations including outbox table and decline mappings
 - Basic API server with health check
 - Temporal worker connecting to server
 - Debezium CDC connector configured
 
 **Milestone:** CDC pipeline operational; outbox events appearing in Kafka
 
-### Phase 2: Authorization Flow (Week 3-4)
+### Phase 2: Adapter Layer (Week 3-4)
+
+**Objectives:**
+- Implement provider-specific adapters
+- Define canonical event model
+- Build decline code mapping system
+
+**Deliverables:**
+- StripeAdapter with signature verification
+- AdyenAdapter with HMAC verification
+- Canonical event type definitions
+- Decline code mapping tables (50+ codes per provider)
+- Adapter unit tests with provider fixtures
+
+**Milestone:** Adapters normalize test webhooks to canonical events
+
+### Phase 3: Authorization Flow (Week 5-6)
 
 **Objectives:**
 - Implement PaymentWorkflow with authorization
-- Build authorization hold tracking
+- Build provider-specific authorization activities
 - Implement multi-balance account model
 
 **Deliverables:**
 - PaymentIntent creation and validation
-- Authorization request activity
+- Provider-specific authorization activities
 - AuthorizationHold entity management
 - Multi-balance tracking (ledger, pending, available)
 - Query handlers for workflow state
 
-**Milestone:** Authorizations creating holds; pending balance updating
+**Milestone:** Authorizations creating holds via any provider
 
-### Phase 3: Capture and Ledger (Week 5-6)
+### Phase 4: Capture and Ledger (Week 7-8)
 
 **Objectives:**
 - Implement capture flow with ledger entries
@@ -870,45 +1054,28 @@ Response behavior:
 - Implement transactional outbox integration
 
 **Deliverables:**
-- Capture activity with partial capture support
+- Provider-specific capture activities
 - Double-entry ledger with clearing accounts
 - Clearing account balance monitoring
 - Outbox event writing in same transaction
-- Event publication via CDC
+- Canonical event publication via CDC
 
 **Milestone:** Complete auth/capture flow with balanced ledger entries
 
-### Phase 4: Recovery and Retry (Week 7-8)
+### Phase 5: Recovery and Production Readiness (Week 9-10)
 
 **Objectives:**
-- Implement decline classification
-- Build retry workflow with linear state machine
-- Add signal handling for method updates
-
-**Deliverables:**
-- Decline code mapping table (50+ common codes)
-- PaymentAttempt record per retry
-- Intelligent retry timing calculation
-- Signal handlers for method update and cancellation
-- Payday alignment for insufficient funds
-
-**Milestone:** Soft declines trigger intelligent retry; signals interrupt waits
-
-### Phase 5: Production Readiness (Week 9-10)
-
-**Objectives:**
-- Integrate real Stripe test mode
+- Implement decline classification using canonical codes
+- Build retry workflow
 - Achieve test coverage targets
-- Complete documentation
 
 **Deliverables:**
-- Real Stripe API integration
-- Webhook handler with signature verification
-- Race condition handling (SELECT FOR UPDATE)
-- Unit tests for workflows
-- Integration tests for critical paths
-- API documentation
-- Architecture documentation
+- ClassifyDecline activity using canonical codes
+- RecoveryWorkflow with intelligent retry
+- Signal handlers for method update and cancellation
+- Webhook handlers with race condition protection
+- Unit and integration tests
+- API and architecture documentation
 
 **Milestone:** All tests pass; documentation complete; demo ready
 
@@ -920,17 +1087,20 @@ Response behavior:
 
 | Criterion | Measurement |
 |-----------|-------------|
+| Multi-provider webhooks work | All three adapters normalize correctly |
+| Canonical model used internally | No provider-specific types in workflows |
 | Intent/Method separation | Payment method can be changed without new intent |
 | Authorization holds work | Pending balance reflects active holds |
 | Capture records ledger entries | Balanced double-entry entries created |
 | Clearing accounts monitored | Non-zero balances generate alerts |
-| Retry creates new attempts | Each retry is a new PaymentAttempt record |
-| CDC publishes events | Events appear in Kafka within 100ms |
+| Retry uses canonical codes | Decline classification provider-agnostic |
+| CDC publishes canonical events | Events appear in Kafka within 100ms |
 
 ### 12.2 Architectural Compliance
 
 | Criterion | Measurement |
 |-----------|-------------|
+| Normalize at edge | Workflows never see provider types |
 | No dual-writes | All events through outbox only |
 | Linear state machines | No circular PaymentAttempt states |
 | Idempotent operations | Duplicate requests return same result |
@@ -941,6 +1111,7 @@ Response behavior:
 | Criterion | Target |
 |-----------|--------|
 | Test coverage (workflow code) | >= 70% |
+| Test coverage (adapter code) | >= 80% |
 | Test coverage (activity code) | >= 70% |
 | Linting passes | Zero warnings |
 | No hardcoded credentials | All via environment/Vault |
@@ -955,7 +1126,8 @@ Response behavior:
 |------|------------|--------|------------|
 | CDC complexity | Medium | High | Start with simple Debezium config; expand gradually |
 | Temporal learning curve | Medium | Medium | Use official tutorials; start with simple workflows |
-| Clearing account confusion | Medium | Medium | Document purpose clearly; add monitoring early |
+| Provider API differences | Medium | Medium | Thorough adapter testing with real webhook samples |
+| Decline code mapping gaps | Medium | Medium | Start with common codes; log unmapped codes |
 | Race condition bugs | High | High | Use SELECT FOR UPDATE consistently; test concurrency |
 
 ### 13.2 Schedule Risks
@@ -963,8 +1135,8 @@ Response behavior:
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
 | Scope creep | Medium | High | Strict adherence to out-of-scope list |
-| CDC setup delays | Medium | Medium | Have NATS fallback without CDC initially |
-| Testing takes longer | Medium | Medium | Write tests alongside features |
+| CDC setup delays | Medium | Medium | Have simple polling fallback initially |
+| Provider documentation gaps | Medium | Low | Use test mode webhooks extensively |
 
 ---
 
@@ -972,24 +1144,24 @@ Response behavior:
 
 ### 14.1 Near-Term
 
+- Additional providers (Square, Braintree)
 - Multi-currency support with exchange rates
 - Partial refund workflow
 - 3D Secure authentication flow
-- Webhook retry with exponential backoff
 
 ### 14.2 Medium-Term
 
+- Smart routing between providers (cost optimization)
 - ML-based retry optimization
 - Fraud scoring integration
 - Real-time analytics dashboard
-- Customer notification service
 
 ### 14.3 Long-Term
 
 - Multi-tenant architecture
 - Cross-border payment support
 - Regulatory reporting automation
-- Quantum-safe encryption preparation
+- Provider failover automation
 
 ---
 
@@ -997,13 +1169,13 @@ Response behavior:
 
 | Category | Examples | Retry Eligible | Typical Resolution |
 |----------|----------|----------------|-------------------|
-| **Soft - Funds** | insufficient_funds, over_limit | Yes | Wait for payday |
-| **Soft - Temporary** | try_again, processing_error | Yes | Retry in hours |
-| **Soft - Generic** | do_not_honor, generic_decline | Yes | Retry with timing variation |
-| **Hard - Card** | expired_card, invalid_number | No | Request new card |
-| **Hard - Account** | account_closed, restricted | No | Contact customer |
-| **Fraud** | fraudulent, stolen_card | No | Flag for review |
-| **Temporary - System** | rate_limit, timeout | Yes (activity-level) | Exponential backoff |
+| **Soft - Funds** | INSUFFICIENT_FUNDS, OVER_LIMIT | Yes | Wait for payday |
+| **Soft - Temporary** | TRY_AGAIN, PROCESSING_ERROR | Yes | Retry in hours |
+| **Soft - Generic** | DO_NOT_HONOR, GENERIC_DECLINE | Yes | Retry with timing variation |
+| **Hard - Card** | CARD_EXPIRED, INVALID_NUMBER | No | Request new card |
+| **Hard - Account** | ACCOUNT_CLOSED, RESTRICTED | No | Contact customer |
+| **Fraud** | FRAUD_SUSPICION, STOLEN_CARD | No | Flag for review |
+| **Temporary - System** | RATE_LIMIT, TIMEOUT | Yes (activity-level) | Exponential backoff |
 
 ---
 
@@ -1011,7 +1183,9 @@ Response behavior:
 
 | Term | Definition |
 |------|------------|
+| **Adapter** | Component that normalizes provider-specific webhooks to canonical model |
 | **Authorization Hold** | A temporary hold on customer funds pending capture |
+| **Canonical Model** | Provider-agnostic internal representation of payment events |
 | **Capture** | The action of claiming previously authorized funds |
 | **CDC** | Change Data Capture - streaming database changes to event bus |
 | **Clearing Account** | Internal account tracking in-flight transactions |
@@ -1021,6 +1195,7 @@ Response behavior:
 | **PaymentAttempt** | Single attempt to process a payment (immutable record) |
 | **PaymentIntent** | The abstract concept of a payment to be made |
 | **PaymentMethod** | The instrument used to make a payment |
+| **Provider** | Third-party payment processor (Stripe, Adyen, PayPal) |
 | **Settlement** | Actual transfer of funds between financial institutions |
 
 ---
