@@ -37,3 +37,8 @@ Thumbs.db
 
 # Vendor (if not committed)
 # vendor/
+
+# Claude Code
+.claude/settings.local.json
+
+temporal-workflow.skill
