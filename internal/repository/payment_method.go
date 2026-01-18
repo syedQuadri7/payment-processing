@@ -78,11 +78,11 @@ func (r *PaymentMethodRepository) GetByCustomerID(ctx context.Context, customerI
 		SELECT id, customer_id, type, provider, token, last_four,
 			expiry_month, expiry_year, is_default, status, created_at, updated_at
 		FROM payment_methods
-		WHERE customer_id = $1 AND status = 'ACTIVE'
+		WHERE customer_id = $1 AND status = $2
 		ORDER BY is_default DESC, created_at DESC
 	`
 
-	rows, err := r.pool.Query(ctx, query, customerID)
+	rows, err := r.pool.Query(ctx, query, customerID, domain.PaymentMethodStatusActive)
 	if err != nil {
 		return nil, fmt.Errorf("querying payment methods: %w", err)
 	}
@@ -110,11 +110,11 @@ func (r *PaymentMethodRepository) GetDefaultForCustomer(ctx context.Context, cus
 		SELECT id, customer_id, type, provider, token, last_four,
 			expiry_month, expiry_year, is_default, status, created_at, updated_at
 		FROM payment_methods
-		WHERE customer_id = $1 AND is_default = true AND status = 'ACTIVE'
+		WHERE customer_id = $1 AND is_default = true AND status = $2
 	`
 
 	pm := &domain.PaymentMethod{}
-	err := r.pool.QueryRow(ctx, query, customerID).Scan(
+	err := r.pool.QueryRow(ctx, query, customerID, domain.PaymentMethodStatusActive).Scan(
 		&pm.ID, &pm.CustomerID, &pm.Type, &pm.Provider, &pm.Token, &pm.LastFour,
 		&pm.ExpiryMonth, &pm.ExpiryYear, &pm.IsDefault, &pm.Status, &pm.CreatedAt, &pm.UpdatedAt,
 	)
@@ -158,11 +158,11 @@ func (r *PaymentMethodRepository) Update(ctx context.Context, pm *domain.Payment
 func (r *PaymentMethodRepository) Delete(ctx context.Context, id string) error {
 	query := `
 		UPDATE payment_methods
-		SET status = 'DELETED', updated_at = $2
+		SET status = $2, updated_at = $3
 		WHERE id = $1
 	`
 
-	result, err := r.pool.Exec(ctx, query, id, time.Now())
+	result, err := r.pool.Exec(ctx, query, id, domain.PaymentMethodStatusDeleted, time.Now())
 	if err != nil {
 		return fmt.Errorf("deleting payment method: %w", err)
 	}

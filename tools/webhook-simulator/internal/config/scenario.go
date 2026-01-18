@@ -12,9 +12,10 @@ type DeclineCode struct {
 type DeclineType string
 
 const (
-	DeclineTypeSoft  DeclineType = "SOFT"
-	DeclineTypeHard  DeclineType = "HARD"
-	DeclineTypeFraud DeclineType = "FRAUD"
+	DeclineTypeSoft      DeclineType = "SOFT"
+	DeclineTypeHard      DeclineType = "HARD"
+	DeclineTypeFraud     DeclineType = "FRAUD"
+	DeclineTypeTemporary DeclineType = "TEMPORARY"
 )
 
 // StripeDeclineCodes maps Stripe decline reasons to canonical codes.
@@ -46,8 +47,8 @@ var StripeDeclineCodes = map[string]DeclineCode{
 	"processing_error": {
 		Provider:  "stripe",
 		Code:      "processing_error",
-		Canonical: "PROCESSING_ERROR",
-		Type:      DeclineTypeSoft,
+		Canonical: "PROCESSOR_ERROR",
+		Type:      DeclineTypeTemporary,
 	},
 }
 

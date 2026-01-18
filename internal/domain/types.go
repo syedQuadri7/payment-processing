@@ -38,6 +38,8 @@ const (
 	PaymentIntentStatusCaptured       PaymentIntentStatus = "CAPTURED"
 	PaymentIntentStatusFailed         PaymentIntentStatus = "FAILED"
 	PaymentIntentStatusCancelled      PaymentIntentStatus = "CANCELLED"
+	PaymentIntentStatusVoided         PaymentIntentStatus = "VOIDED"
+	PaymentIntentStatusRecovering     PaymentIntentStatus = "RECOVERING"
 )
 
 // CaptureMethod represents how the payment should be captured

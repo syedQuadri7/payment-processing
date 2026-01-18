@@ -76,7 +76,18 @@ func (r *PaymentIntentRepository) GetByWorkflowID(ctx context.Context, workflowI
 	return r.getByColumn(ctx, "workflow_id", workflowID)
 }
 
+// validPaymentIntentColumns defines the allowlist of columns that can be queried
+var validPaymentIntentColumns = map[string]bool{
+	"id":              true,
+	"idempotency_key": true,
+	"workflow_id":     true,
+}
+
 func (r *PaymentIntentRepository) getByColumn(ctx context.Context, column, value string) (*domain.PaymentIntent, error) {
+	if !validPaymentIntentColumns[column] {
+		return nil, fmt.Errorf("invalid column for payment intent query: %s", column)
+	}
+
 	query := fmt.Sprintf(`
 		SELECT id, idempotency_key, customer_id, amount, currency, status,
 			capture_method, provider, provider_payment_id, payment_method_id,
@@ -101,7 +112,11 @@ func (r *PaymentIntentRepository) getByColumn(ctx context.Context, column, value
 		return nil, fmt.Errorf("querying payment intent: %w", err)
 	}
 
-	pi.Amount, _ = decimal.NewFromString(amountStr)
+	var parseErr error
+	pi.Amount, parseErr = decimal.NewFromString(amountStr)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing amount: %w", parseErr)
+	}
 
 	if len(metadataJSON) > 0 {
 		if err := json.Unmarshal(metadataJSON, &pi.Metadata); err != nil {

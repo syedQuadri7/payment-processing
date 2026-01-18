@@ -138,9 +138,17 @@ func runSend(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		fmt.Println("Payload:")
 		var prettyJSON map[string]any
-		json.Unmarshal(payload, &prettyJSON)
-		pretty, _ := json.MarshalIndent(prettyJSON, "", "  ")
-		fmt.Println(string(pretty))
+		if err := json.Unmarshal(payload, &prettyJSON); err != nil {
+			// If we can't parse as JSON, just print raw payload
+			fmt.Println(string(payload))
+		} else {
+			pretty, err := json.MarshalIndent(prettyJSON, "", "  ")
+			if err != nil {
+				fmt.Println(string(payload))
+			} else {
+				fmt.Println(string(pretty))
+			}
+		}
 		return nil
 	}
 

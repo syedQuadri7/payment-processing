@@ -47,12 +47,22 @@ func (pi *PaymentIntent) CanTransitionTo(newStatus PaymentIntentStatus) bool {
 		},
 		PaymentIntentStatusAuthorized: {
 			PaymentIntentStatusCaptured,
+			PaymentIntentStatusVoided,
 			PaymentIntentStatusFailed,
 			PaymentIntentStatusCancelled,
 		},
-		PaymentIntentStatusCaptured:  {},
-		PaymentIntentStatusFailed:    {},
+		PaymentIntentStatusCaptured: {
+			PaymentIntentStatusRecovering,
+		},
+		PaymentIntentStatusFailed: {
+			PaymentIntentStatusRecovering,
+		},
+		PaymentIntentStatusRecovering: {
+			PaymentIntentStatusAuthorized,
+			PaymentIntentStatusFailed,
+		},
 		PaymentIntentStatusCancelled: {},
+		PaymentIntentStatusVoided:    {},
 	}
 
 	allowed, ok := validTransitions[pi.Status]
@@ -72,5 +82,6 @@ func (pi *PaymentIntent) CanTransitionTo(newStatus PaymentIntentStatus) bool {
 func (pi *PaymentIntent) IsTerminal() bool {
 	return pi.Status == PaymentIntentStatusCaptured ||
 		pi.Status == PaymentIntentStatusFailed ||
-		pi.Status == PaymentIntentStatusCancelled
+		pi.Status == PaymentIntentStatusCancelled ||
+		pi.Status == PaymentIntentStatusVoided
 }

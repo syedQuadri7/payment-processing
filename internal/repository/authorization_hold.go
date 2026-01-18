@@ -90,12 +90,12 @@ func (r *AuthorizationHoldRepository) GetActiveByPaymentIntentID(ctx context.Con
 			auth_code, network_txn_id, expires_at, captured_amount, captured_at,
 			created_at, updated_at
 		FROM authorization_holds
-		WHERE payment_intent_id = $1 AND status = 'ACTIVE' AND expires_at > NOW()
+		WHERE payment_intent_id = $1 AND status = $2 AND expires_at > NOW()
 		ORDER BY created_at DESC
 		LIMIT 1
 	`
 
-	return r.scanRow(r.pool.QueryRow(ctx, query, intentID))
+	return r.scanRow(r.pool.QueryRow(ctx, query, intentID, domain.HoldStatusActive))
 }
 
 func (r *AuthorizationHoldRepository) scanRow(row pgx.Row) (*domain.AuthorizationHold, error) {
@@ -114,8 +114,15 @@ func (r *AuthorizationHoldRepository) scanRow(row pgx.Row) (*domain.Authorizatio
 		return nil, fmt.Errorf("querying authorization hold: %w", err)
 	}
 
-	ah.Amount, _ = decimal.NewFromString(amountStr)
-	ah.CapturedAmount, _ = decimal.NewFromString(capturedAmountStr)
+	var parseErr error
+	ah.Amount, parseErr = decimal.NewFromString(amountStr)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing amount: %w", parseErr)
+	}
+	ah.CapturedAmount, parseErr = decimal.NewFromString(capturedAmountStr)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing captured amount: %w", parseErr)
+	}
 
 	return ah, nil
 }
