@@ -1,0 +1,93 @@
+name: "Fraud Decline and Dispute Scenarios"
+target: "http://localhost:8080"
+
+scenarios:
+  - name: "stripe_fraudulent"
+    provider: "stripe"
+    steps:
+      - event: "payment_intent.payment_failed"
+        data:
+          payment_id: "pi_fraud_001"
+          amount: 100000
+          currency: "usd"
+          decline_code: "fraudulent"
+        expect_status: 200
+
+  - name: "stripe_dispute"
+    provider: "stripe"
+    steps:
+      - event: "charge.dispute.created"
+        data:
+          dispute_id: "dp_fraud_001"
+          charge_id: "ch_original_001"
+          amount: 50000
+          currency: "usd"
+          reason: "fraudulent"
+        expect_status: 200
+
+      - event: "charge.dispute.closed"
+        delay: "1s"
+        data:
+          dispute_id: "dp_fraud_001"
+          charge_id: "ch_original_001"
+          amount: 50000
+          currency: "usd"
+          reason: "fraudulent"
+          status: "lost"
+        expect_status: 200
+
+  - name: "adyen_fraud_suspicion"
+    provider: "adyen"
+    steps:
+      - event: "AUTHORISATION"
+        data:
+          psp_reference: "ADYEN_FRAUD_001"
+          merchant_reference: "ORDER_FRAUD_001"
+          amount: 100000
+          currency: "USD"
+          decline_code: "Refused:59"
+        expect_status: 200
+
+  - name: "adyen_chargeback"
+    provider: "adyen"
+    steps:
+      - event: "CHARGEBACK"
+        data:
+          psp_reference: "ADYEN_CB_001"
+          original_reference: "ADYEN_ORIG_001"
+          amount: 50000
+          currency: "USD"
+          reason: "Chargeback"
+        expect_status: 200
+
+  - name: "paypal_fraud"
+    provider: "paypal"
+    steps:
+      - event: "PAYMENT.CAPTURE.DENIED"
+        data:
+          capture_id: "CAP-FRAUD-001"
+          amount: 100000
+          currency: "USD"
+          decline_code: "TRANSACTION_REFUSED"
+        expect_status: 200
+
+  - name: "paypal_dispute"
+    provider: "paypal"
+    steps:
+      - event: "CUSTOMER.DISPUTE.CREATED"
+        data:
+          dispute_id: "PP-DISPUTE-001"
+          transaction_id: "TXN-ORIG-001"
+          amount: 50000
+          currency: "USD"
+          reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED"
+        expect_status: 200
+
+      - event: "CUSTOMER.DISPUTE.RESOLVED"
+        delay: "1s"
+        data:
+          dispute_id: "PP-DISPUTE-001"
+          amount: 50000
+          currency: "USD"
+          outcome: "RESOLVED_BUYER_FAVOUR"
+        expect_status: 200

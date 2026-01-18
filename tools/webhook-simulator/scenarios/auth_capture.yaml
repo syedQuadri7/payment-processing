@@ -1,0 +1,59 @@
+name: "Authorization and Capture Happy Path"
+target: "http://localhost:8080"
+
+scenarios:
+  - name: "stripe_auth_capture"
+    provider: "stripe"
+    steps:
+      - event: "payment_intent.succeeded"
+        data:
+          payment_id: "pi_test_001"
+          amount: 10000
+          currency: "usd"
+        expect_status: 200
+
+      - event: "charge.captured"
+        delay: "500ms"
+        data:
+          charge_id: "ch_test_001"
+          amount: 10000
+          currency: "usd"
+        expect_status: 200
+
+  - name: "adyen_auth_capture"
+    provider: "adyen"
+    steps:
+      - event: "AUTHORISATION"
+        data:
+          psp_reference: "ADYEN_TEST_001"
+          merchant_reference: "ORDER_001"
+          amount: 10000
+          currency: "USD"
+        expect_status: 200
+
+      - event: "CAPTURE"
+        delay: "500ms"
+        data:
+          psp_reference: "ADYEN_CAPTURE_001"
+          original_reference: "ADYEN_TEST_001"
+          amount: 10000
+          currency: "USD"
+        expect_status: 200
+
+  - name: "paypal_auth_capture"
+    provider: "paypal"
+    steps:
+      - event: "PAYMENT.AUTHORIZATION.CREATED"
+        data:
+          authorization_id: "AUTH-PP-001"
+          amount: 10000
+          currency: "USD"
+        expect_status: 200
+
+      - event: "PAYMENT.CAPTURE.COMPLETED"
+        delay: "500ms"
+        data:
+          capture_id: "CAP-PP-001"
+          amount: 10000
+          currency: "USD"
+        expect_status: 200

@@ -1,0 +1,87 @@
+name: "Invalid Signature and Payload Scenarios"
+target: "http://localhost:8080"
+
+scenarios:
+  - name: "stripe_no_signature"
+    provider: "stripe"
+    steps:
+      - event: "payment_intent.succeeded"
+        data:
+          payment_id: "pi_nosig_001"
+          amount: 10000
+          currency: "usd"
+        sign_opts:
+          skip_signature: true
+        expect_status: 401
+
+  - name: "stripe_invalid_signature"
+    provider: "stripe"
+    steps:
+      - event: "payment_intent.succeeded"
+        data:
+          payment_id: "pi_badsig_001"
+          amount: 10000
+          currency: "usd"
+        sign_opts:
+          invalid_key: true
+        expect_status: 401
+
+  - name: "stripe_expired_timestamp"
+    provider: "stripe"
+    steps:
+      - event: "payment_intent.succeeded"
+        data:
+          payment_id: "pi_oldts_001"
+          amount: 10000
+          currency: "usd"
+        sign_opts:
+          timestamp_offset: "-10m"
+        expect_status: 401
+
+  - name: "adyen_no_signature"
+    provider: "adyen"
+    steps:
+      - event: "AUTHORISATION"
+        data:
+          psp_reference: "ADYEN_NOSIG_001"
+          amount: 10000
+          currency: "USD"
+        sign_opts:
+          skip_signature: true
+        expect_status: 401
+
+  - name: "adyen_invalid_signature"
+    provider: "adyen"
+    steps:
+      - event: "AUTHORISATION"
+        data:
+          psp_reference: "ADYEN_BADSIG_001"
+          amount: 10000
+          currency: "USD"
+        sign_opts:
+          invalid_key: true
+        expect_status: 401
+
+  - name: "paypal_no_headers"
+    provider: "paypal"
+    steps:
+      - event: "PAYMENT.CAPTURE.COMPLETED"
+        data:
+          capture_id: "CAP-NOSIG-001"
+          amount: 10000
+          currency: "USD"
+        sign_opts:
+          skip_signature: true
+        expect_status: 401
+
+  - name: "paypal_invalid_headers"
+    provider: "paypal"
+    steps:
+      - event: "PAYMENT.CAPTURE.COMPLETED"
+        data:
+          capture_id: "CAP-BADSIG-001"
+          amount: 10000
+          currency: "USD"
+        sign_opts:
+          invalid_key: true
+        expect_status: 401

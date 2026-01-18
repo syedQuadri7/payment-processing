@@ -1,0 +1,82 @@
+name: "Soft Decline Scenarios"
+target: "http://localhost:8080"
+
+scenarios:
+  - name: "stripe_insufficient_funds"
+    provider: "stripe"
+    steps:
+      - event: "payment_intent.payment_failed"
+        data:
+          payment_id: "pi_soft_001"
+          amount: 50000
+          currency: "usd"
+          decline_code: "insufficient_funds"
+        expect_status: 200
+
+  - name: "stripe_card_declined"
+    provider: "stripe"
+    steps:
+      - event: "charge.failed"
+        data:
+          charge_id: "ch_soft_001"
+          amount: 25000
+          currency: "usd"
+          decline_code: "card_declined"
+        expect_status: 200
+
+  - name: "stripe_processing_error"
+    provider: "stripe"
+    steps:
+      - event: "payment_intent.payment_failed"
+        data:
+          payment_id: "pi_soft_002"
+          amount: 15000
+          currency: "usd"
+          decline_code: "processing_error"
+        expect_status: 200
+
+  - name: "adyen_insufficient_funds"
+    provider: "adyen"
+    steps:
+      - event: "AUTHORISATION"
+        data:
+          psp_reference: "ADYEN_SOFT_001"
+          merchant_reference: "ORDER_SOFT_001"
+          amount: 50000
+          currency: "USD"
+          decline_code: "Refused:51"
+        expect_status: 200
+
+  - name: "adyen_do_not_honor"
+    provider: "adyen"
+    steps:
+      - event: "AUTHORISATION"
+        data:
+          psp_reference: "ADYEN_SOFT_002"
+          merchant_reference: "ORDER_SOFT_002"
+          amount: 30000
+          currency: "USD"
+          decline_code: "Refused:05"
+        expect_status: 200
+
+  - name: "paypal_insufficient_funds"
+    provider: "paypal"
+    steps:
+      - event: "PAYMENT.CAPTURE.DENIED"
+        data:
+          capture_id: "CAP-SOFT-001"
+          amount: 50000
+          currency: "USD"
+          decline_code: "INSUFFICIENT_FUNDS"
+        expect_status: 200
+
+  - name: "paypal_payment_denied"
+    provider: "paypal"
+    steps:
+      - event: "PAYMENT.CAPTURE.DENIED"
+        data:
+          capture_id: "CAP-SOFT-002"
+          amount: 35000
+          currency: "USD"
+          decline_code: "PAYMENT_DENIED"
+        expect_status: 200
