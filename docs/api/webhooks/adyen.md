@@ -1,66 +1,58 @@
 # Adyen Webhooks (Notifications)
 
-Documentation for receiving and processing Adyen notification webhooks.
+Receiving and processing Adyen notification webhooks.
 
 ## Endpoint
 
-```
-POST /webhooks/adyen
-```
+POST `/webhooks/adyen`
 
 ## Authentication
 
-Adyen signs notifications using HMAC-SHA256. The signature is included in request headers.
+Adyen signs notifications using HMAC-SHA256.
 
-### Headers
+### Signature Header
 
 | Header | Description |
 |--------|-------------|
 | `HmacSignature` | HMAC-SHA256 signature of the payload |
 
-### Verification Process
+### Verification Requirements
 
 1. Extract HMAC signature from header
 2. Compute HMAC-SHA256 of raw request body using HMAC key
-3. Compare computed signature with provided signature (constant-time comparison)
+3. Compare signatures using constant-time comparison
 4. Reject with 401 if signatures don't match
 
 ### Configuration
 
-```bash
-ADYEN_HMAC_KEY=... # From Adyen Customer Area > Developers > Webhooks
-```
+| Variable | Source | Purpose |
+|----------|--------|---------|
+| `ADYEN_HMAC_KEY` | Adyen Customer Area > Developers > Webhooks | HMAC signing key |
+
+---
 
 ## Notification Format
 
-Adyen sends notifications in a specific format with `notificationItems`:
+Adyen sends notifications as an array of `notificationItems`. A single request may contain multiple notifications (batching).
 
-```json
-{
-  "live": "false",
-  "notificationItems": [
-    {
-      "NotificationRequestItem": {
-        "eventCode": "AUTHORISATION",
-        "success": "true",
-        "pspReference": "8835512345678901",
-        "merchantReference": "pi_abc123",
-        "amount": {
-          "currency": "USD",
-          "value": 10000
-        },
-        "paymentMethod": "visa",
-        "reason": "",
-        "eventDate": "2026-01-17T10:30:00+00:00"
-      }
-    }
-  ]
-}
-```
+### Key Fields
+
+| Field | Description |
+|-------|-------------|
+| `eventCode` | Type of notification (AUTHORISATION, CAPTURE, etc.) |
+| `success` | Whether the operation succeeded (string "true"/"false") |
+| `pspReference` | Adyen's unique reference for this operation |
+| `merchantReference` | Our internal payment intent ID |
+| `originalReference` | Reference to original authorization (for captures, refunds) |
+| `amount.value` | Amount in smallest currency unit |
+| `amount.currency` | Currency code |
+| `reason` | Decline reason code (if failed) |
+
+---
 
 ## Event Mapping
 
-Adyen events are normalized to canonical events before processing.
+Adyen events must be normalized to canonical events. Note that success/failure is indicated by the `success` field, not separate event codes.
 
 | Adyen Event | Success | Canonical Event |
 |-------------|---------|-----------------|
@@ -75,217 +67,95 @@ Adyen events are normalized to canonical events before processing.
 | `CHARGEBACK` | - | `DISPUTE_OPENED` |
 | `CHARGEBACK_REVERSED` | - | `DISPUTE_WON` |
 
+---
+
 ## Decline Code Mapping
 
-Adyen uses reason codes in the format `Refused:XX`.
+Adyen uses reason codes in the format `Refused:XX` where XX is a numeric code.
 
-| Adyen Reason | Canonical Code | Decline Type |
-|--------------|----------------|--------------|
-| `Refused:51` | `INSUFFICIENT_FUNDS` | Soft |
-| `Refused:05` | `GENERIC_DECLINE` | Soft |
-| `Refused:57` | `DO_NOT_HONOR` | Soft |
-| `Refused:91` | `TRY_AGAIN` | Soft |
-| `Refused:96` | `PROCESSING_ERROR` | Soft |
-| `Refused:33` | `CARD_EXPIRED` | Hard |
-| `Refused:14` | `INVALID_NUMBER` | Hard |
-| `Refused:82` | `INVALID_CVV` | Hard |
-| `Refused:62` | `CARD_RESTRICTED` | Hard |
-| `Refused:63` | `CARD_RESTRICTED` | Hard |
-| `Refused:59` | `FRAUD_SUSPICION` | Fraud |
-| `Refused:41` | `LOST_CARD` | Fraud |
-| `Refused:43` | `STOLEN_CARD` | Fraud |
+### Soft Declines (Retry Eligible)
 
-## Example Notification Payloads
+| Adyen Reason | Canonical Code |
+|--------------|----------------|
+| `Refused:51` | `INSUFFICIENT_FUNDS` |
+| `Refused:05` | `GENERIC_DECLINE` |
+| `Refused:57` | `DO_NOT_HONOR` |
+| `Refused:91` | `TRY_AGAIN` |
+| `Refused:96` | `PROCESSING_ERROR` |
 
-### AUTHORISATION (Success)
+### Hard Declines (Not Retry Eligible)
 
-```json
-{
-  "live": "false",
-  "notificationItems": [
-    {
-      "NotificationRequestItem": {
-        "eventCode": "AUTHORISATION",
-        "success": "true",
-        "pspReference": "8835512345678901",
-        "merchantReference": "pi_abc123",
-        "merchantAccountCode": "TestMerchant",
-        "amount": {
-          "currency": "USD",
-          "value": 10000
-        },
-        "paymentMethod": "visa",
-        "operations": ["CAPTURE", "CANCEL"],
-        "eventDate": "2026-01-17T10:30:00+00:00",
-        "additionalData": {
-          "authCode": "AUTH123",
-          "cardSummary": "1234"
-        }
-      }
-    }
-  ]
-}
-```
+| Adyen Reason | Canonical Code |
+|--------------|----------------|
+| `Refused:33` | `CARD_EXPIRED` |
+| `Refused:14` | `INVALID_NUMBER` |
+| `Refused:82` | `INVALID_CVV` |
+| `Refused:62` | `CARD_RESTRICTED` |
+| `Refused:63` | `CARD_RESTRICTED` |
 
-### AUTHORISATION (Failed)
+### Fraud Declines
 
-```json
-{
-  "live": "false",
-  "notificationItems": [
-    {
-      "NotificationRequestItem": {
-        "eventCode": "AUTHORISATION",
-        "success": "false",
-        "pspReference": "8835512345678902",
-        "merchantReference": "pi_abc123",
-        "amount": {
-          "currency": "USD",
-          "value": 10000
-        },
-        "paymentMethod": "visa",
-        "reason": "Refused:51",
-        "eventDate": "2026-01-17T10:30:00+00:00",
-        "additionalData": {
-          "refusalReasonRaw": "DECLINED Insufficient Funds"
-        }
-      }
-    }
-  ]
-}
-```
+| Adyen Reason | Canonical Code |
+|--------------|----------------|
+| `Refused:59` | `FRAUD_SUSPICION` |
+| `Refused:41` | `LOST_CARD` |
+| `Refused:43` | `STOLEN_CARD` |
 
-### CAPTURE
+---
 
-```json
-{
-  "live": "false",
-  "notificationItems": [
-    {
-      "NotificationRequestItem": {
-        "eventCode": "CAPTURE",
-        "success": "true",
-        "pspReference": "8835512345678903",
-        "originalReference": "8835512345678901",
-        "merchantReference": "pi_abc123",
-        "amount": {
-          "currency": "USD",
-          "value": 10000
-        },
-        "eventDate": "2026-01-17T10:35:00+00:00"
-      }
-    }
-  ]
-}
-```
+## Response Requirements
 
-### CHARGEBACK
+### Success
 
-```json
-{
-  "live": "false",
-  "notificationItems": [
-    {
-      "NotificationRequestItem": {
-        "eventCode": "CHARGEBACK",
-        "success": "true",
-        "pspReference": "8835512345678904",
-        "originalReference": "8835512345678901",
-        "merchantReference": "pi_abc123",
-        "amount": {
-          "currency": "USD",
-          "value": 10000
-        },
-        "reason": "Fraudulent",
-        "eventDate": "2026-01-17T15:00:00+00:00",
-        "additionalData": {
-          "disputeStatus": "PENDING"
-        }
-      }
-    }
-  ]
-}
-```
+Adyen requires a specific acknowledgment response:
+- HTTP status: 200
+- Body: Plain text `[accepted]`
 
-## Response Handling
+### Error Handling
 
-### Success Response
+| HTTP Status | Meaning | Adyen Behavior |
+|-------------|---------|----------------|
+| 200 with `[accepted]` | Success | Notification marked delivered |
+| 401 | Invalid HMAC | No retry |
+| 4xx | Client error | Limited retries |
+| 5xx | Server error | Retries with exponential backoff |
 
-Adyen expects a specific acknowledgment response:
+### Retry Behavior
 
-```
-[accepted]
-```
+Adyen retries failed notifications for up to 7 days.
 
-Return this as plain text with status `200`.
+---
 
-### Error Responses
+## Batch Processing
 
-| Status | Meaning | Adyen Behavior |
-|--------|---------|----------------|
-| `200` with `[accepted]` | Success | Notification marked delivered |
-| `401` | Invalid HMAC | No retry |
-| `4xx` | Client error | Limited retries |
-| `5xx` | Server error | Retries with exponential backoff |
+Adyen may send multiple notifications in a single request. Requirements:
 
-**Retry Schedule:** Adyen retries for up to 7 days.
+1. Process each notification item individually
+2. Only return `[accepted]` if ALL items are successfully processed or queued
+3. If any item fails fatally, return error to trigger retry of entire batch
 
-## Batch Notifications
+---
 
-Adyen may batch multiple notifications in a single request:
+## Idempotency Requirements
 
-```json
-{
-  "live": "false",
-  "notificationItems": [
-    {"NotificationRequestItem": {...}},
-    {"NotificationRequestItem": {...}},
-    {"NotificationRequestItem": {...}}
-  ]
-}
-```
+The adapter must handle duplicate notifications:
 
-Process each notification item individually. Return `[accepted]` only if all items are successfully processed or stored for retry.
+1. Use `pspReference` + `eventCode` as the unique identifier
+2. Return 200 for already-processed notifications (do not reprocess)
+3. Track processed notification IDs
 
-## Idempotency
+---
 
-Use `pspReference` as the unique identifier for idempotency:
+## Provider-Specific Considerations
 
-```go
-func (a *AdyenAdapter) HandleNotification(ctx context.Context, item NotificationRequestItem) error {
-    eventKey := fmt.Sprintf("adyen-%s-%s", item.PspReference, item.EventCode)
+### Merchant Reference
 
-    if a.repo.EventProcessed(ctx, eventKey) {
-        return nil // Already processed
-    }
+Our internal payment intent ID is passed as `merchantReference` when creating the payment. This enables correlation when receiving notifications.
 
-    // Process notification...
+### Original Reference
 
-    a.repo.MarkEventProcessed(ctx, eventKey, time.Now())
-    return nil
-}
-```
+For operations on existing authorizations (capture, refund, cancellation), the `originalReference` field links back to the original authorization's `pspReference`.
 
-## Testing
+### Test vs Live
 
-### Adyen Test Dashboard
-
-1. Go to Customer Area > Developers > Webhooks
-2. Select your webhook configuration
-3. Click "Test" to send test notifications
-
-### Webhook Simulator
-
-Use the local webhook simulator:
-
-```bash
-# Send test notification
-curl -X POST http://localhost:8081/simulate/adyen/authorisation \
-  -d '{"merchant_reference": "pi_abc123", "amount": 10000, "success": true}'
-
-# Send decline notification
-curl -X POST http://localhost:8081/simulate/adyen/authorisation \
-  -d '{"merchant_reference": "pi_abc123", "amount": 10000, "success": false, "reason": "Refused:51"}'
-```
-
-See [Simulations Documentation](../../simulations/readme.md) for details.
+The `live` field indicates whether this is a test ("false") or production ("true") notification.

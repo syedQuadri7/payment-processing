@@ -1,162 +1,104 @@
-# Quick Reference
+# Documentation Reference
 
-Fast lookup for common values, codes, and patterns used in the payment processing service.
+Quick navigation to all documentation in this project.
 
-## Canonical Event Types
+## Getting Started
 
-| Event Type | Description |
-|------------|-------------|
-| `AUTHORIZATION_SUCCEEDED` | Authorization approved, hold placed |
-| `AUTHORIZATION_FAILED` | Authorization declined |
-| `CAPTURE_SUCCEEDED` | Capture confirmed |
-| `CAPTURE_FAILED` | Capture failed |
-| `VOID_SUCCEEDED` | Authorization voided |
-| `REFUND_SUCCEEDED` | Refund processed |
-| `REFUND_FAILED` | Refund failed |
-| `DISPUTE_OPENED` | Chargeback initiated |
-| `DISPUTE_WON` | Dispute resolved in our favor |
-| `DISPUTE_LOST` | Dispute resolved against us |
+| Document | Purpose |
+|----------|---------|
+| [Documentation Overview](readme.md) | Start here - project overview and development process |
+| [Glossary](glossary.md) | Terms and definitions for payment and technical concepts |
+| [Service Requirements](requirements/service-requirements.md) | What we're building and why |
+| [Technical Specification](requirements/technical-spec.md) | How we're building it |
 
-## Canonical Decline Codes
+## Research
 
-### Soft Declines (Retry Eligible)
+| Document | Purpose |
+|----------|---------|
+| [Payment Systems Research](research/payment-systems-research.md) | Industry patterns from Stripe, Square, Adyen - foundational reading for understanding our architectural choices |
 
-| Code | Description | Retry Strategy |
-|------|-------------|----------------|
-| `INSUFFICIENT_FUNDS` | Not enough balance | Align with paydays |
-| `OVER_LIMIT` | Credit limit exceeded | Wait 24-48 hours |
-| `GENERIC_DECLINE` | Unspecified decline | Exponential backoff |
-| `DO_NOT_HONOR` | Issuer refused without reason | Vary timing |
-| `TRY_AGAIN` | Temporary processing error | Retry in 1-4 hours |
-| `PROCESSING_ERROR` | System error | Retry with backoff |
+## Architecture Decisions
 
-### Hard Declines (Not Retry Eligible)
+Why we made the choices we did. Read these to understand the reasoning behind the system design.
 
-| Code | Description | Action Required |
-|------|-------------|-----------------|
-| `CARD_EXPIRED` | Card past expiration | Request new card |
-| `INVALID_NUMBER` | Card number invalid | Verify card details |
-| `INVALID_CVV` | CVV mismatch | Re-enter CVV |
-| `ACCOUNT_CLOSED` | Account no longer active | Contact customer |
-| `CARD_RESTRICTED` | Card has restrictions | Use different card |
+| Document | Decision |
+|----------|----------|
+| [ADR-001](decisions/001-temporal-workflow-engine.md) | Why Temporal for workflow orchestration |
+| [ADR-002](decisions/002-multi-provider-adapters.md) | How we handle multiple payment providers |
+| [ADR-003](decisions/003-transactional-outbox.md) | How we publish events reliably |
+| [ADR-004](decisions/004-double-entry-bookkeeping.md) | How we track money movement |
+| [Decision Log](decisions/readme.md) | Index of all ADRs with summaries |
+| [Pending Decisions](decisions/pending-decisions.md) | Decisions awaiting input - **review and answer** |
 
-### Fraud Declines (Never Retry)
+## API Documentation
 
-| Code | Description | Action Required |
-|------|-------------|-----------------|
-| `FRAUD_SUSPICION` | Suspected fraud | Flag for review |
-| `STOLEN_CARD` | Reported stolen | Do not process |
-| `LOST_CARD` | Reported lost | Do not process |
+Reference for implementing and testing endpoints.
 
-## Provider Event Mapping
+| Document | Covers |
+|----------|--------|
+| [API Overview](api/readme.md) | Authentication, error formats, idempotency |
+| [Payment Intents](api/internal/intents.md) | Create, authorize, capture payments |
+| [Accounts](api/internal/accounts.md) | Balance queries and ledger entries |
+| [Health & Metrics](api/internal/health.md) | Health checks and Prometheus metrics |
 
-### Stripe to Canonical
+### Webhook Receivers
 
-| Stripe Event | Canonical Event |
-|--------------|-----------------|
-| `payment_intent.succeeded` | `AUTHORIZATION_SUCCEEDED` |
-| `payment_intent.payment_failed` | `AUTHORIZATION_FAILED` |
-| `charge.captured` | `CAPTURE_SUCCEEDED` |
-| `charge.failed` | `CAPTURE_FAILED` |
-| `charge.refunded` | `REFUND_SUCCEEDED` |
-| `charge.dispute.created` | `DISPUTE_OPENED` |
+How we receive and process notifications from payment providers.
 
-### Adyen to Canonical
+| Document | Provider |
+|----------|----------|
+| [Stripe Webhooks](api/webhooks/stripe.md) | Stripe signature verification, event mapping |
+| [Adyen Webhooks](api/webhooks/adyen.md) | Adyen HMAC verification, notification handling |
+| [PayPal Webhooks](api/webhooks/paypal.md) | PayPal verification API, event mapping |
 
-| Adyen Notification | Canonical Event |
-|--------------------|-----------------|
-| `AUTHORISATION` (success=true) | `AUTHORIZATION_SUCCEEDED` |
-| `AUTHORISATION` (success=false) | `AUTHORIZATION_FAILED` |
-| `CAPTURE` | `CAPTURE_SUCCEEDED` |
-| `CAPTURE_FAILED` | `CAPTURE_FAILED` |
-| `REFUND` | `REFUND_SUCCEEDED` |
-| `CHARGEBACK` | `DISPUTE_OPENED` |
+## Database Schema
 
-### PayPal to Canonical
+Reference for database structure and usage patterns.
 
-| PayPal Event | Canonical Event |
-|--------------|-----------------|
-| `PAYMENT.AUTHORIZATION.CREATED` | `AUTHORIZATION_SUCCEEDED` |
-| `PAYMENT.AUTHORIZATION.VOIDED` | `AUTHORIZATION_FAILED` |
-| `PAYMENT.CAPTURE.COMPLETED` | `CAPTURE_SUCCEEDED` |
-| `PAYMENT.CAPTURE.DENIED` | `CAPTURE_FAILED` |
-| `PAYMENT.CAPTURE.REFUNDED` | `REFUND_SUCCEEDED` |
-| `CUSTOMER.DISPUTE.CREATED` | `DISPUTE_OPENED` |
+| Document | Covers |
+|----------|--------|
+| [Schema Overview](schema/readme.md) | Database design principles, migration info |
+| [Core Tables](schema/core-tables.md) | payment_intents, payment_methods, payment_attempts, authorization_holds, decline_code_mappings |
+| [Ledger Tables](schema/ledger-tables.md) | accounts, journal_entries, ledger_entries, clearing accounts |
+| [Outbox & Audit](schema/outbox-audit.md) | outbox, audit_log, processed_events |
 
-## Payment Intent States
+## Testing
 
-```
-CREATED → REQUIRES_AUTH → AUTHORIZED → CAPTURED
-                ↓              ↓
-            CANCELLED       VOIDED
-                ↓
-           RECOVERING → FAILED
-```
+| Document | Purpose |
+|----------|---------|
+| [Simulations Overview](simulations/readme.md) | Using the webhook simulator for testing |
+| [Webhook Simulator README](../tools/webhook-simulator/README.md) | Full simulator documentation |
 
-## API Endpoints Quick Reference
+## By Task
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/intents` | Create payment intent |
-| `GET` | `/api/v1/intents/:id` | Get intent status |
-| `PUT` | `/api/v1/intents/:id/method` | Attach payment method |
-| `POST` | `/api/v1/intents/:id/authorize` | Request authorization |
-| `POST` | `/api/v1/intents/:id/capture` | Capture funds |
-| `POST` | `/api/v1/intents/:id/cancel` | Cancel intent |
-| `POST` | `/webhooks/stripe` | Stripe webhooks |
-| `POST` | `/webhooks/adyen` | Adyen notifications |
-| `POST` | `/webhooks/paypal` | PayPal webhooks |
-| `GET` | `/health` | Health check |
-| `GET` | `/metrics` | Prometheus metrics |
+### "I need to understand the system"
+1. [Documentation Overview](readme.md)
+2. [Glossary](glossary.md) - understand the terminology
+3. [Payment Systems Research](research/payment-systems-research.md)
+4. [Service Requirements](requirements/service-requirements.md)
 
-## Environment Variables
+### "I need to make a decision"
+1. [Pending Decisions](decisions/pending-decisions.md) - decisions awaiting input
+2. [Decision Log](decisions/readme.md) - how past decisions were made
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TEMPORAL_HOST` | `localhost:7233` | Temporal server address |
-| `PORT` | `8080` | HTTP server port |
-| `DATABASE_URL` | - | PostgreSQL connection string |
-| `STRIPE_SECRET_KEY` | - | Stripe API key |
-| `STRIPE_WEBHOOK_SECRET` | - | Stripe webhook signing secret |
-| `ADYEN_API_KEY` | - | Adyen API key |
-| `ADYEN_HMAC_KEY` | - | Adyen HMAC signing key |
-| `PAYPAL_CLIENT_ID` | - | PayPal client ID |
-| `PAYPAL_CLIENT_SECRET` | - | PayPal client secret |
+### "I need to implement a new feature"
+1. [Technical Specification](requirements/technical-spec.md)
+2. Relevant ADR in [decisions/](decisions/readme.md)
+3. [Schema documentation](schema/readme.md)
 
-## Temporal Configuration
+### "I need to add a new payment provider"
+1. [ADR-002: Multi-Provider Adapters](decisions/002-multi-provider-adapters.md)
+2. Existing webhook docs: [Stripe](api/webhooks/stripe.md), [Adyen](api/webhooks/adyen.md), [PayPal](api/webhooks/paypal.md)
+3. [Core Tables](schema/core-tables.md) - decline_code_mappings section
 
-| Setting | Value |
-|---------|-------|
-| Task Queue | `payment-processing` |
-| Workflow Timeout | 30 days |
-| Activity Initial Interval | 1 second |
-| Activity Backoff Coefficient | 2.0 |
-| Activity Max Attempts | 3 (PSP calls) |
+### "I need to test webhook handling"
+1. [Simulations Overview](simulations/readme.md)
+2. [Webhook Simulator README](../tools/webhook-simulator/README.md)
 
-## Database Tables
+### "I need to debug a payment issue"
+1. [Schema: Outbox & Audit](schema/outbox-audit.md) - audit_log queries
+2. [Schema: Core Tables](schema/core-tables.md) - payment_attempts for history
+3. [Schema: Ledger Tables](schema/ledger-tables.md) - clearing account monitoring
 
-| Table | Purpose |
-|-------|---------|
-| `payment_intents` | Payment intent records |
-| `authorization_holds` | Active authorization holds |
-| `payment_attempts` | Individual payment attempts |
-| `payment_methods` | Stored payment methods |
-| `accounts` | Account balances |
-| `ledger_entries` | Double-entry bookkeeping |
-| `outbox` | Transactional outbox for CDC |
-| `audit_log` | Audit trail |
-| `decline_code_mappings` | Provider to canonical code mapping |
-
-## HTTP Status Codes
-
-| Code | Meaning | When Used |
-|------|---------|-----------|
-| `200` | Success | GET requests, webhook acknowledgment |
-| `201` | Created | POST creating new resource |
-| `202` | Accepted | Async operation started |
-| `400` | Bad Request | Validation error |
-| `401` | Unauthorized | Invalid webhook signature |
-| `404` | Not Found | Resource doesn't exist |
-| `409` | Conflict | Idempotency conflict |
-| `422` | Unprocessable | Business rule violation |
-| `500` | Server Error | Internal error |
+### "I don't understand a term"
+1. [Glossary](glossary.md) - payment, technical, and project-specific terms

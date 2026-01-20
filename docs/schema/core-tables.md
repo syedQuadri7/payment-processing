@@ -4,107 +4,83 @@ Database tables for payment processing core functionality.
 
 ## payment_intents
 
-Represents a customer's intention to pay. Central entity in the payment lifecycle.
+The central entity representing a customer's intention to pay. Tracks the complete payment lifecycle from creation through capture or cancellation.
 
-```sql
-CREATE TABLE payment_intents (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    idempotency_key       VARCHAR(100) UNIQUE NOT NULL,
-    customer_id           VARCHAR(50) NOT NULL,
-    amount                DECIMAL(19,4) NOT NULL,
-    currency              VARCHAR(3) NOT NULL,
-    status                VARCHAR(20) NOT NULL,
-    capture_method        VARCHAR(20) NOT NULL DEFAULT 'AUTOMATIC',
-    provider              VARCHAR(20) NOT NULL,
-    provider_payment_id   VARCHAR(100),
-    payment_method_id     UUID REFERENCES payment_methods(id),
-    workflow_id           VARCHAR(100) UNIQUE,
-    metadata              JSONB,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+### Fields
 
-CREATE INDEX idx_intents_customer ON payment_intents(customer_id);
-CREATE INDEX idx_intents_status ON payment_intents(status);
-CREATE INDEX idx_intents_provider ON payment_intents(provider);
-CREATE INDEX idx_intents_provider_pmt_id ON payment_intents(provider, provider_payment_id);
-CREATE INDEX idx_intents_created ON payment_intents(created_at);
-```
-
-### Columns
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `idempotency_key` | VARCHAR(100) | Client-provided deduplication key |
-| `customer_id` | VARCHAR(50) | Customer identifier |
-| `amount` | DECIMAL(19,4) | Payment amount in smallest currency unit |
-| `currency` | VARCHAR(3) | ISO 4217 currency code |
-| `status` | VARCHAR(20) | Current state (see states below) |
-| `capture_method` | VARCHAR(20) | AUTOMATIC or MANUAL |
-| `provider` | VARCHAR(20) | STRIPE, ADYEN, or PAYPAL |
-| `provider_payment_id` | VARCHAR(100) | Provider's payment/charge ID |
-| `payment_method_id` | UUID | Attached payment method |
-| `workflow_id` | VARCHAR(100) | Temporal workflow ID |
-| `metadata` | JSONB | Custom key-value data |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
-| `updated_at` | TIMESTAMPTZ | Last update timestamp |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key |
+| `idempotency_key` | String(100) | Yes | Client-provided deduplication key (unique) |
+| `customer_id` | String(50) | Yes | Customer identifier |
+| `amount` | Decimal(19,4) | Yes | Payment amount |
+| `currency` | String(3) | Yes | ISO 4217 currency code |
+| `status` | String(20) | Yes | Current state |
+| `capture_method` | String(20) | Yes | AUTOMATIC or MANUAL (default: AUTOMATIC) |
+| `provider` | String(20) | Yes | STRIPE, ADYEN, or PAYPAL |
+| `provider_payment_id` | String(100) | No | Provider's payment/charge ID |
+| `payment_method_id` | UUID | No | Reference to attached payment method |
+| `workflow_id` | String(100) | No | Temporal workflow ID (unique) |
+| `metadata` | JSON | No | Custom key-value data |
+| `created_at` | Timestamp | Yes | Creation timestamp |
+| `updated_at` | Timestamp | Yes | Last update timestamp |
 
 ### Status Values
 
-| Status | Description |
-|--------|-------------|
-| `CREATED` | Intent created, no method attached |
-| `REQUIRES_AUTH` | Method attached, awaiting authorization |
-| `AUTHORIZED` | Authorization approved, hold placed |
-| `RECOVERING` | Soft decline, retry in progress |
-| `CAPTURED` | Funds captured (terminal) |
-| `VOIDED` | Authorization voided (terminal) |
-| `FAILED` | Hard decline or retries exhausted (terminal) |
-| `CANCELLED` | Manually cancelled (terminal) |
+| Status | Terminal | Description |
+|--------|----------|-------------|
+| `CREATED` | No | Intent created, no method attached |
+| `REQUIRES_AUTH` | No | Method attached, awaiting authorization |
+| `AUTHORIZED` | No | Authorization approved, hold placed |
+| `RECOVERING` | No | Soft decline, retry in progress |
+| `CAPTURED` | Yes | Funds captured successfully |
+| `VOIDED` | Yes | Authorization voided |
+| `FAILED` | Yes | Hard decline or retries exhausted |
+| `CANCELLED` | Yes | Manually cancelled |
+
+### Indexes Required
+
+- Customer ID (frequent lookups by customer)
+- Status (filtering by payment state)
+- Provider (reporting by provider)
+- Provider + Provider Payment ID (webhook correlation)
+- Created timestamp (time-based queries)
+
+### Business Rules
+
+- Idempotency key must be unique (enforced at database level)
+- Workflow ID must be unique when set
+- Status transitions must follow defined state machine
+- Terminal states cannot transition to other states
 
 ---
 
 ## payment_methods
 
-Tokenized payment instruments associated with customers.
+Tokenized payment instruments associated with customers. Stores only non-sensitive token references.
 
-```sql
-CREATE TABLE payment_methods (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id     VARCHAR(50) NOT NULL,
-    type            VARCHAR(20) NOT NULL,
-    provider        VARCHAR(20) NOT NULL,
-    provider_token  VARCHAR(100) NOT NULL,
-    last_four       VARCHAR(4),
-    expiry_month    INTEGER,
-    expiry_year     INTEGER,
-    card_brand      VARCHAR(20),
-    is_default      BOOLEAN NOT NULL DEFAULT false,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+### Fields
 
-CREATE INDEX idx_methods_customer ON payment_methods(customer_id);
-CREATE INDEX idx_methods_provider ON payment_methods(provider);
-```
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key |
+| `customer_id` | String(50) | Yes | Owning customer |
+| `type` | String(20) | Yes | CARD, BANK_ACCOUNT, WALLET |
+| `provider` | String(20) | Yes | Which PSP holds the token |
+| `provider_token` | String(100) | Yes | Provider's token ID |
+| `last_four` | String(4) | No | Last 4 digits (for display) |
+| `expiry_month` | Integer | No | Card expiry month |
+| `expiry_year` | Integer | No | Card expiry year |
+| `card_brand` | String(20) | No | VISA, MASTERCARD, AMEX, etc. |
+| `is_default` | Boolean | Yes | Default method for customer |
+| `created_at` | Timestamp | Yes | Creation timestamp |
+| `updated_at` | Timestamp | Yes | Last update timestamp |
 
-### Columns
+### Security Requirements
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `customer_id` | VARCHAR(50) | Owning customer |
-| `type` | VARCHAR(20) | CARD, BANK_ACCOUNT, WALLET |
-| `provider` | VARCHAR(20) | Which PSP holds the token |
-| `provider_token` | VARCHAR(100) | Provider's token ID |
-| `last_four` | VARCHAR(4) | Last 4 digits (cards) |
-| `expiry_month` | INTEGER | Card expiry month |
-| `expiry_year` | INTEGER | Card expiry year |
-| `card_brand` | VARCHAR(20) | VISA, MASTERCARD, AMEX, etc. |
-| `is_default` | BOOLEAN | Default method for customer |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
-| `updated_at` | TIMESTAMPTZ | Last update timestamp |
+- Never store full card numbers, CVV, or sensitive data
+- Only store tokenized references from payment providers
+- Last four digits stored only for customer display purposes
 
 ---
 
@@ -112,167 +88,130 @@ CREATE INDEX idx_methods_provider ON payment_methods(provider);
 
 Tracks active authorization holds placed on customer funds.
 
-```sql
-CREATE TABLE authorization_holds (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    payment_intent_id     UUID NOT NULL REFERENCES payment_intents(id),
-    amount                DECIMAL(19,4) NOT NULL,
-    currency              VARCHAR(3) NOT NULL,
-    status                VARCHAR(20) NOT NULL,
-    provider              VARCHAR(20) NOT NULL,
-    authorization_code    VARCHAR(50),
-    network_txn_id        VARCHAR(100),
-    expires_at            TIMESTAMPTZ NOT NULL,
-    captured_amount       DECIMAL(19,4),
-    captured_at           TIMESTAMPTZ,
-    voided_at             TIMESTAMPTZ,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+### Fields
 
-CREATE INDEX idx_holds_intent ON authorization_holds(payment_intent_id);
-CREATE INDEX idx_holds_status ON authorization_holds(status);
-CREATE INDEX idx_holds_expires ON authorization_holds(expires_at) WHERE status = 'ACTIVE';
-```
-
-### Columns
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `payment_intent_id` | UUID | Parent payment intent |
-| `amount` | DECIMAL(19,4) | Authorized amount |
-| `currency` | VARCHAR(3) | Currency code |
-| `status` | VARCHAR(20) | ACTIVE, CAPTURED, VOIDED, EXPIRED |
-| `provider` | VARCHAR(20) | Authorizing provider |
-| `authorization_code` | VARCHAR(50) | Issuer auth code |
-| `network_txn_id` | VARCHAR(100) | Card network reference |
-| `expires_at` | TIMESTAMPTZ | Hold expiration time |
-| `captured_amount` | DECIMAL(19,4) | Amount captured (may be partial) |
-| `captured_at` | TIMESTAMPTZ | Capture timestamp |
-| `voided_at` | TIMESTAMPTZ | Void timestamp |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key |
+| `payment_intent_id` | UUID | Yes | Reference to parent intent |
+| `amount` | Decimal(19,4) | Yes | Authorized amount |
+| `currency` | String(3) | Yes | Currency code |
+| `status` | String(20) | Yes | Hold status |
+| `provider` | String(20) | Yes | Authorizing provider |
+| `authorization_code` | String(50) | No | Issuer authorization code |
+| `network_txn_id` | String(100) | No | Card network reference |
+| `expires_at` | Timestamp | Yes | Hold expiration time |
+| `captured_amount` | Decimal(19,4) | No | Amount captured (may be partial) |
+| `captured_at` | Timestamp | No | Capture timestamp |
+| `voided_at` | Timestamp | No | Void timestamp |
+| `created_at` | Timestamp | Yes | Creation timestamp |
 
 ### Status Values
 
 | Status | Description |
 |--------|-------------|
-| `ACTIVE` | Hold is active, can be captured |
+| `ACTIVE` | Hold is active, can be captured or voided |
 | `CAPTURED` | Hold was captured (fully or partially) |
 | `VOIDED` | Hold was voided before capture |
-| `EXPIRED` | Hold expired without capture |
+| `EXPIRED` | Hold expired without action |
+
+### Business Rules
+
+- One active hold per payment intent at a time
+- Captured amount cannot exceed authorized amount
+- Partial capture is supported
+- Holds have provider-specific expiration periods (typically 5-30 days)
+
+### Indexes Required
+
+- Payment intent ID (lookup by parent)
+- Status (finding active holds)
+- Expires at (WHERE status = 'ACTIVE') - for expiration monitoring
 
 ---
 
 ## payment_attempts
 
-Immutable record of each payment attempt. Implements linear state machine pattern.
+Immutable record of each payment attempt. Implements linear state machine pattern where each retry creates a new record.
 
-```sql
-CREATE TABLE payment_attempts (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    payment_intent_id     UUID NOT NULL REFERENCES payment_intents(id),
-    attempt_number        INTEGER NOT NULL,
-    status                VARCHAR(20) NOT NULL,
-    provider              VARCHAR(20) NOT NULL,
-    provider_response     VARCHAR(100),
-    canonical_decline     VARCHAR(50),
-    decline_type          VARCHAR(20),
-    processor_txn_id      VARCHAR(100),
-    idempotency_key       VARCHAR(150) UNIQUE NOT NULL,
-    error_message         TEXT,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at          TIMESTAMPTZ,
+### Fields
 
-    CONSTRAINT uq_attempt_number UNIQUE (payment_intent_id, attempt_number)
-);
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key |
+| `payment_intent_id` | UUID | Yes | Reference to parent intent |
+| `attempt_number` | Integer | Yes | Sequential attempt number (1, 2, 3...) |
+| `status` | String(20) | Yes | Attempt status |
+| `provider` | String(20) | Yes | Provider used for this attempt |
+| `provider_response` | String(100) | No | Raw provider response code |
+| `canonical_decline` | String(50) | No | Normalized decline code |
+| `decline_type` | String(20) | No | SOFT, HARD, FRAUD, TEMPORARY |
+| `processor_txn_id` | String(100) | No | Provider's transaction ID |
+| `idempotency_key` | String(150) | Yes | Attempt-specific idempotency key (unique) |
+| `error_message` | Text | No | Human-readable error message |
+| `created_at` | Timestamp | Yes | Attempt start time |
+| `completed_at` | Timestamp | No | Attempt completion time |
 
-CREATE INDEX idx_attempts_intent ON payment_attempts(payment_intent_id);
-CREATE INDEX idx_attempts_status ON payment_attempts(status);
-CREATE INDEX idx_attempts_canonical ON payment_attempts(canonical_decline);
-CREATE INDEX idx_attempts_created ON payment_attempts(created_at);
-```
+### Status Values (Linear State Machine)
 
-### Columns
+| Status | Description | Transitions To |
+|--------|-------------|----------------|
+| `PENDING` | Attempt created, not started | PROCESSING |
+| `PROCESSING` | In progress with provider | SUCCEEDED, FAILED |
+| `SUCCEEDED` | Attempt succeeded | (terminal) |
+| `FAILED` | Attempt failed | (terminal) |
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `payment_intent_id` | UUID | Parent payment intent |
-| `attempt_number` | INTEGER | Sequential attempt number (1, 2, 3...) |
-| `status` | VARCHAR(20) | PENDING, PROCESSING, SUCCEEDED, FAILED |
-| `provider` | VARCHAR(20) | Provider used for this attempt |
-| `provider_response` | VARCHAR(100) | Raw provider response code |
-| `canonical_decline` | VARCHAR(50) | Normalized decline code |
-| `decline_type` | VARCHAR(20) | SOFT, HARD, FRAUD, TEMPORARY |
-| `processor_txn_id` | VARCHAR(100) | Provider's transaction ID |
-| `idempotency_key` | VARCHAR(150) | Attempt-specific idempotency key |
-| `error_message` | TEXT | Human-readable error message |
-| `created_at` | TIMESTAMPTZ | Attempt start time |
-| `completed_at` | TIMESTAMPTZ | Attempt completion time |
+### Constraints
 
-### Status Values (Linear - No Backward Transitions)
-
-```
-PENDING → PROCESSING → SUCCEEDED
-              │
-              └──────→ FAILED
-```
+- Unique constraint on (payment_intent_id, attempt_number)
+- Unique constraint on idempotency_key
+- No backward state transitions allowed
 
 ### Idempotency Key Format
 
-```
-{workflow_id}-{provider}-{operation}-{attempt_number}
-```
+The idempotency key for each attempt should follow the format:
+`{workflow_id}-{provider}-{operation}-{attempt_number}`
 
-Example: `payment-abc123-STRIPE-authorize-2`
+This ensures each attempt has a unique key even for the same intent.
 
 ---
 
 ## decline_code_mappings
 
-Maps provider-specific decline codes to canonical codes.
+Configuration table mapping provider-specific decline codes to canonical codes. This table is seeded with initial data and can be updated without code changes.
 
-```sql
-CREATE TABLE decline_code_mappings (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    provider              VARCHAR(20) NOT NULL,
-    provider_code         VARCHAR(100) NOT NULL,
-    canonical_code        VARCHAR(50) NOT NULL,
-    decline_type          VARCHAR(20) NOT NULL,
-    description           TEXT,
-    retry_eligible        BOOLEAN NOT NULL DEFAULT false,
-    suggested_action      TEXT,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+### Fields
 
-    CONSTRAINT uq_provider_code UNIQUE (provider, provider_code)
-);
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key |
+| `provider` | String(20) | Yes | STRIPE, ADYEN, PAYPAL |
+| `provider_code` | String(100) | Yes | Raw provider decline code |
+| `canonical_code` | String(50) | Yes | Normalized internal code |
+| `decline_type` | String(20) | Yes | SOFT, HARD, FRAUD, TEMPORARY |
+| `description` | Text | No | Human-readable description |
+| `retry_eligible` | Boolean | Yes | Whether retry is permitted |
+| `suggested_action` | Text | No | Recommended customer action |
+| `created_at` | Timestamp | Yes | Creation timestamp |
 
-CREATE INDEX idx_decline_provider ON decline_code_mappings(provider);
-CREATE INDEX idx_decline_canonical ON decline_code_mappings(canonical_code);
-```
+### Constraints
 
-### Columns
+- Unique constraint on (provider, provider_code)
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `provider` | VARCHAR(20) | STRIPE, ADYEN, PAYPAL |
-| `provider_code` | VARCHAR(100) | Raw provider decline code |
-| `canonical_code` | VARCHAR(50) | Normalized internal code |
-| `decline_type` | VARCHAR(20) | SOFT, HARD, FRAUD, TEMPORARY |
-| `description` | TEXT | Human-readable description |
-| `retry_eligible` | BOOLEAN | Whether retry is permitted |
-| `suggested_action` | TEXT | Recommended customer action |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
+### Decline Types
 
-### Example Data
+| Type | Retry Eligible | Behavior |
+|------|----------------|----------|
+| `SOFT` | Yes | Schedule automatic retry |
+| `HARD` | No | Stop retrying, request new payment method |
+| `FRAUD` | No | Flag for review, do not retry |
+| `TEMPORARY` | Yes | Retry after short delay |
 
-```sql
-INSERT INTO decline_code_mappings (provider, provider_code, canonical_code, decline_type, retry_eligible, description) VALUES
-('STRIPE', 'insufficient_funds', 'INSUFFICIENT_FUNDS', 'SOFT', true, 'Card has insufficient funds'),
-('STRIPE', 'expired_card', 'CARD_EXPIRED', 'HARD', false, 'Card has expired'),
-('STRIPE', 'fraudulent', 'FRAUD_SUSPICION', 'FRAUD', false, 'Suspected fraudulent transaction'),
-('ADYEN', 'Refused:51', 'INSUFFICIENT_FUNDS', 'SOFT', true, 'Not enough balance'),
-('ADYEN', 'Refused:33', 'CARD_EXPIRED', 'HARD', false, 'Expired card'),
-('PAYPAL', 'INSUFFICIENT_FUNDS', 'INSUFFICIENT_FUNDS', 'SOFT', true, 'Insufficient funds in account');
-```
+### Seed Data Requirements
+
+The table must be seeded with mappings for all known decline codes from:
+- Stripe decline codes
+- Adyen refusal reasons
+- PayPal decline reasons
+
+Unknown codes should fall back to `GENERIC_DECLINE` with `SOFT` type.

@@ -1,46 +1,42 @@
 # Stripe Webhooks
 
-Documentation for receiving and processing Stripe webhook events.
+Receiving and processing Stripe webhook events.
 
 ## Endpoint
 
-```
-POST /webhooks/stripe
-```
+POST `/webhooks/stripe`
 
 ## Authentication
 
 Stripe signs webhook payloads using HMAC-SHA256. The signature is included in the `Stripe-Signature` header.
 
-### Header Format
-
-```
-Stripe-Signature: t=1492774577,v1=5257a869e7ecebeda32affa62cdca3fa51cad7e77a0e56ff536d0ce8e108d8bd,v0=...
-```
+### Signature Header Components
 
 | Component | Description |
 |-----------|-------------|
 | `t` | Timestamp (Unix seconds) |
 | `v1` | HMAC-SHA256 signature |
-| `v0` | Legacy signature (deprecated) |
+| `v0` | Legacy signature (deprecated, ignore) |
 
-### Verification Process
+### Verification Requirements
 
 1. Extract timestamp and signature from header
 2. Reject if timestamp is more than 5 minutes old (replay protection)
-3. Construct signed payload: `{timestamp}.{raw_body}`
+3. Construct signed payload as: `{timestamp}.{raw_body}`
 4. Compute HMAC-SHA256 using webhook secret
-5. Compare computed signature with provided `v1` signature
+5. Compare signatures using constant-time comparison
 
 ### Configuration
 
-```bash
-STRIPE_WEBHOOK_SECRET=whsec_... # From Stripe Dashboard > Webhooks
-```
+| Variable | Source | Purpose |
+|----------|--------|---------|
+| `STRIPE_WEBHOOK_SECRET` | Stripe Dashboard > Webhooks | Signing secret for HMAC verification |
+
+---
 
 ## Event Mapping
 
-Stripe events are normalized to canonical events before processing.
+Stripe events must be normalized to canonical events before processing.
 
 | Stripe Event | Canonical Event | Notes |
 |--------------|-----------------|-------|
@@ -50,207 +46,102 @@ Stripe events are normalized to canonical events before processing.
 | `charge.captured` | `CAPTURE_SUCCEEDED` | |
 | `charge.failed` | `CAPTURE_FAILED` | |
 | `charge.refunded` | `REFUND_SUCCEEDED` | |
-| `charge.refund.updated` | - | Log only |
+| `charge.refund.updated` | (log only) | No state change |
 | `charge.dispute.created` | `DISPUTE_OPENED` | |
-| `charge.dispute.closed` | `DISPUTE_WON` or `DISPUTE_LOST` | Based on status |
+| `charge.dispute.closed` | `DISPUTE_WON` or `DISPUTE_LOST` | Based on dispute status |
+
+---
 
 ## Decline Code Mapping
 
-| Stripe Code | Canonical Code | Decline Type |
-|-------------|----------------|--------------|
-| `insufficient_funds` | `INSUFFICIENT_FUNDS` | Soft |
-| `card_declined` | `GENERIC_DECLINE` | Soft |
-| `do_not_honor` | `DO_NOT_HONOR` | Soft |
-| `try_again_later` | `TRY_AGAIN` | Soft |
-| `processing_error` | `PROCESSING_ERROR` | Soft |
-| `expired_card` | `CARD_EXPIRED` | Hard |
-| `incorrect_cvc` | `INVALID_CVV` | Hard |
-| `invalid_number` | `INVALID_NUMBER` | Hard |
-| `card_not_supported` | `CARD_RESTRICTED` | Hard |
-| `fraudulent` | `FRAUD_SUSPICION` | Fraud |
-| `lost_card` | `LOST_CARD` | Fraud |
-| `stolen_card` | `STOLEN_CARD` | Fraud |
+Stripe decline codes must be mapped to canonical codes for consistent handling.
 
-## Example Webhook Payloads
+### Soft Declines (Retry Eligible)
 
-### payment_intent.succeeded
+| Stripe Code | Canonical Code |
+|-------------|----------------|
+| `insufficient_funds` | `INSUFFICIENT_FUNDS` |
+| `card_declined` | `GENERIC_DECLINE` |
+| `do_not_honor` | `DO_NOT_HONOR` |
+| `try_again_later` | `TRY_AGAIN` |
+| `processing_error` | `PROCESSING_ERROR` |
 
-```json
-{
-  "id": "evt_1234567890",
-  "object": "event",
-  "api_version": "2023-10-16",
-  "created": 1705487400,
-  "type": "payment_intent.succeeded",
-  "data": {
-    "object": {
-      "id": "pi_xyz789",
-      "object": "payment_intent",
-      "amount": 10000,
-      "currency": "usd",
-      "status": "succeeded",
-      "customer": "cus_abc123",
-      "payment_method": "pm_456",
-      "metadata": {
-        "internal_id": "pi_abc123"
-      },
-      "created": 1705487350
-    }
-  }
-}
-```
+### Hard Declines (Not Retry Eligible)
 
-### payment_intent.payment_failed
+| Stripe Code | Canonical Code |
+|-------------|----------------|
+| `expired_card` | `CARD_EXPIRED` |
+| `incorrect_cvc` | `INVALID_CVV` |
+| `invalid_number` | `INVALID_NUMBER` |
+| `card_not_supported` | `CARD_RESTRICTED` |
 
-```json
-{
-  "id": "evt_0987654321",
-  "object": "event",
-  "type": "payment_intent.payment_failed",
-  "data": {
-    "object": {
-      "id": "pi_xyz789",
-      "object": "payment_intent",
-      "amount": 10000,
-      "currency": "usd",
-      "status": "requires_payment_method",
-      "last_payment_error": {
-        "code": "insufficient_funds",
-        "decline_code": "insufficient_funds",
-        "message": "Your card has insufficient funds.",
-        "type": "card_error"
-      },
-      "metadata": {
-        "internal_id": "pi_abc123"
-      }
-    }
-  }
-}
-```
+### Fraud Declines
 
-### charge.captured
+| Stripe Code | Canonical Code |
+|-------------|----------------|
+| `fraudulent` | `FRAUD_SUSPICION` |
+| `lost_card` | `LOST_CARD` |
+| `stolen_card` | `STOLEN_CARD` |
 
-```json
-{
-  "id": "evt_capture123",
-  "object": "event",
-  "type": "charge.captured",
-  "data": {
-    "object": {
-      "id": "ch_abc123",
-      "object": "charge",
-      "amount": 10000,
-      "amount_captured": 10000,
-      "captured": true,
-      "currency": "usd",
-      "payment_intent": "pi_xyz789",
-      "status": "succeeded",
-      "metadata": {
-        "internal_id": "pi_abc123"
-      }
-    }
-  }
-}
-```
+---
 
-### charge.dispute.created
+## Response Requirements
 
-```json
-{
-  "id": "evt_dispute123",
-  "object": "event",
-  "type": "charge.dispute.created",
-  "data": {
-    "object": {
-      "id": "dp_abc123",
-      "object": "dispute",
-      "amount": 10000,
-      "charge": "ch_abc123",
-      "currency": "usd",
-      "reason": "fraudulent",
-      "status": "needs_response",
-      "created": 1705487400
-    }
-  }
-}
-```
+### Success
 
-## Response Handling
+Return HTTP 200 with empty body or acknowledgment. Event will be marked as delivered.
 
-### Success Response
+### Error Handling
 
-Return `200 OK` with empty body or acknowledgment:
+| HTTP Status | Meaning | Stripe Behavior |
+|-------------|---------|-----------------|
+| 200 | Success | Event marked delivered |
+| 401 | Invalid signature | Event marked failed, no retry |
+| 4xx | Client error | Event marked failed, limited retries |
+| 5xx | Server error | Stripe retries with exponential backoff |
 
-```json
-{
-  "received": true
-}
-```
+### Retry Behavior
 
-### Error Responses
+Stripe retries failed webhooks for up to 3 days with exponential backoff.
 
-| Status | Meaning | Stripe Behavior |
-|--------|---------|-----------------|
-| `200` | Success | Event marked delivered |
-| `401` | Invalid signature | Event marked failed, no retry |
-| `4xx` | Client error | Event marked failed, limited retries |
-| `5xx` | Server error | Stripe will retry with exponential backoff |
+---
 
-**Retry Schedule:** Stripe retries up to 3 days with exponential backoff.
+## Idempotency Requirements
 
-## Idempotency
+Stripe may send the same event multiple times. The adapter must:
 
-Stripe may send the same event multiple times. The adapter must handle duplicates:
+1. Track processed event IDs
+2. Return 200 for already-processed events (do not reprocess)
+3. Use the event `id` field as the unique identifier
 
-```go
-func (a *StripeAdapter) HandleWebhook(ctx context.Context, event stripe.Event) error {
-    // Check if already processed
-    if a.repo.EventProcessed(ctx, event.ID) {
-        return nil // Return 200, already handled
-    }
+---
 
-    // Process event...
+## Key Data Fields
 
-    // Mark as processed
-    a.repo.MarkEventProcessed(ctx, event.ID, time.Now())
-    return nil
-}
-```
+When processing Stripe webhooks, extract these fields:
 
-## Testing
+| Field Path | Purpose |
+|------------|---------|
+| `id` | Event ID for idempotency |
+| `type` | Event type for routing |
+| `data.object.id` | Payment intent or charge ID |
+| `data.object.metadata.internal_id` | Our internal payment intent ID |
+| `data.object.amount` | Amount in smallest currency unit |
+| `data.object.currency` | Currency code |
+| `data.object.last_payment_error.decline_code` | Decline code (if failed) |
 
-### Stripe CLI
+---
 
-Use Stripe CLI to forward test webhooks:
+## Provider-Specific Considerations
 
-```bash
-# Install Stripe CLI
-brew install stripe/stripe-cli/stripe
+### Metadata Correlation
 
-# Login
-stripe login
+Our internal payment intent ID should be stored in Stripe's metadata field when creating the payment. This enables correlation when receiving webhooks.
 
-# Forward webhooks to local endpoint
-stripe listen --forward-to localhost:8080/webhooks/stripe
+### Amount Format
 
-# Trigger test events
-stripe trigger payment_intent.succeeded
-stripe trigger payment_intent.payment_failed
-stripe trigger charge.captured
-stripe trigger charge.dispute.created
-```
+Stripe amounts are in the smallest currency unit (e.g., cents for USD). Convert appropriately when normalizing to canonical format.
 
-### Webhook Simulator
+### Test vs Live Mode
 
-Use the local webhook simulator for comprehensive testing:
-
-```bash
-# Start simulator
-go run cmd/simulator/main.go --provider stripe
-
-# Send test webhook
-curl -X POST http://localhost:8081/simulate/stripe/payment_intent.succeeded \
-  -d '{"payment_intent_id": "pi_abc123", "amount": 10000}'
-```
-
-See [Simulations Documentation](../../simulations/readme.md) for details.
+The webhook endpoint receives both test and live events. Use the `livemode` field to distinguish if needed.

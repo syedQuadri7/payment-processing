@@ -1,40 +1,27 @@
 # Payment Intents API
 
-Payment Intents represent the lifecycle of a payment from creation through capture or cancellation.
+Payment Intents represent the lifecycle of a payment from creation through capture or cancellation. This is the primary API for processing payments.
 
 ## Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/intents` | Create a payment intent |
-| `GET` | `/api/v1/intents/:id` | Get intent status |
-| `PUT` | `/api/v1/intents/:id/method` | Attach payment method |
-| `POST` | `/api/v1/intents/:id/authorize` | Request authorization |
-| `POST` | `/api/v1/intents/:id/capture` | Capture authorized funds |
-| `POST` | `/api/v1/intents/:id/cancel` | Cancel intent |
-| `GET` | `/api/v1/intents/:id/attempts` | Get attempt history |
-| `GET` | `/api/v1/intents/:id/hold` | Get authorization hold |
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/v1/intents` | Create a payment intent |
+| GET | `/api/v1/intents/:id` | Get intent status |
+| PUT | `/api/v1/intents/:id/method` | Attach payment method |
+| POST | `/api/v1/intents/:id/authorize` | Request authorization |
+| POST | `/api/v1/intents/:id/capture` | Capture authorized funds |
+| POST | `/api/v1/intents/:id/cancel` | Cancel intent |
+| GET | `/api/v1/intents/:id/attempts` | Get attempt history |
+| GET | `/api/v1/intents/:id/hold` | Get authorization hold details |
 
 ---
 
 ## Create Payment Intent
 
-Creates a new payment intent. The intent must specify which payment provider to use.
+Creates a new payment intent specifying the amount, currency, customer, and payment provider.
 
-### Request
-
-```
-POST /api/v1/intents
-```
-
-### Headers
-
-| Header | Required | Description |
-|--------|----------|-------------|
-| `Content-Type` | Yes | `application/json` |
-| `Idempotency-Key` | Yes | Unique key for request deduplication |
-
-### Body Parameters
+### Request Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -44,326 +31,189 @@ POST /api/v1/intents
 | `provider` | string | Yes | Payment provider: `STRIPE`, `ADYEN`, or `PAYPAL` |
 | `capture_method` | string | No | `automatic` (default) or `manual` |
 | `payment_method_id` | string | No | Pre-attach a payment method |
-| `metadata` | object | No | Custom key-value pairs |
+| `metadata` | object | No | Custom key-value pairs for client use |
 
-### Example Request
+### Response Fields
 
-```bash
-curl -X POST http://localhost:8080/api/v1/intents \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000" \
-  -d '{
-    "amount": "100.00",
-    "currency": "USD",
-    "customer_id": "cust_123",
-    "provider": "STRIPE",
-    "capture_method": "manual",
-    "metadata": {
-      "order_id": "order_789"
-    }
-  }'
-```
+| Field | Description |
+|-------|-------------|
+| `id` | Unique payment intent identifier |
+| `idempotency_key` | The provided deduplication key |
+| `status` | Current state of the intent |
+| `workflow_id` | Temporal workflow ID for tracking |
+| `created_at` | Creation timestamp |
 
-### Example Response
+### Business Rules
 
-```json
-{
-  "id": "pi_abc123",
-  "idempotency_key": "550e8400-e29b-41d4-a716-446655440000",
-  "customer_id": "cust_123",
-  "amount": "100.00",
-  "currency": "USD",
-  "status": "created",
-  "provider": "STRIPE",
-  "capture_method": "manual",
-  "payment_method_id": null,
-  "workflow_id": "payment-550e8400-e29b-41d4-a716-446655440000",
-  "metadata": {
-    "order_id": "order_789"
-  },
-  "created_at": "2026-01-17T10:30:00Z",
-  "updated_at": "2026-01-17T10:30:00Z"
-}
-```
-
-### Response Codes
-
-| Code | Description |
-|------|-------------|
-| `201` | Intent created successfully |
-| `400` | Invalid request body |
-| `409` | Idempotency key conflict |
+- Amount must be greater than zero
+- Currency must be a supported ISO 4217 code
+- Provider must be one of the configured payment providers
+- Idempotency key is required and must be unique within 24 hours
 
 ---
 
 ## Get Payment Intent
 
-Retrieves the current status of a payment intent.
+Retrieves the current status and details of a payment intent.
 
-### Request
+### Response Includes
 
-```
-GET /api/v1/intents/:id
-```
-
-### Example Request
-
-```bash
-curl http://localhost:8080/api/v1/intents/pi_abc123
-```
-
-### Example Response
-
-```json
-{
-  "id": "pi_abc123",
-  "idempotency_key": "550e8400-e29b-41d4-a716-446655440000",
-  "customer_id": "cust_123",
-  "amount": "100.00",
-  "currency": "USD",
-  "status": "authorized",
-  "provider": "STRIPE",
-  "provider_payment_id": "pi_stripe_xyz789",
-  "capture_method": "manual",
-  "payment_method_id": "pm_456",
-  "workflow_id": "payment-550e8400-e29b-41d4-a716-446655440000",
-  "hold": {
-    "id": "hold_def456",
-    "amount": "100.00",
-    "status": "active",
-    "expires_at": "2026-01-24T10:30:00Z"
-  },
-  "metadata": {
-    "order_id": "order_789"
-  },
-  "created_at": "2026-01-17T10:30:00Z",
-  "updated_at": "2026-01-17T10:35:00Z"
-}
-```
+- Current status and all state timestamps
+- Attached payment method (if any)
+- Authorization hold details (if authorized)
+- Provider-assigned payment ID
+- Custom metadata
 
 ---
 
 ## Attach Payment Method
 
-Attaches a payment method to an existing intent. Can be updated until authorization.
+Attaches or updates the payment method on an intent. Can only be done before authorization.
 
-### Request
-
-```
-PUT /api/v1/intents/:id/method
-```
-
-### Body Parameters
+### Request Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `payment_method_id` | string | Yes | Payment method identifier |
 
-### Example Request
+### Business Rules
 
-```bash
-curl -X PUT http://localhost:8080/api/v1/intents/pi_abc123/method \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: 660e8400-e29b-41d4-a716-446655440001" \
-  -d '{
-    "payment_method_id": "pm_456"
-  }'
-```
-
-### Example Response
-
-```json
-{
-  "id": "pi_abc123",
-  "status": "requires_authorization",
-  "payment_method_id": "pm_456",
-  "updated_at": "2026-01-17T10:32:00Z"
-}
-```
+- Payment method must belong to the same customer
+- Cannot attach method after authorization has occurred
+- Method can be changed multiple times before authorization
 
 ---
 
 ## Authorize Payment
 
-Requests authorization from the payment provider. Places a hold on customer funds.
+Requests authorization from the payment provider, placing a hold on customer funds.
 
-### Request
+### Behavior
 
-```
-POST /api/v1/intents/:id/authorize
-```
+- Calls the configured payment provider to request authorization
+- On success: creates an authorization hold and updates status to `authorized`
+- On soft decline: status moves to `recovering` for automatic retry
+- On hard decline: status moves to `requires_payment_method`
 
-### Example Request
+### Response Includes (Success)
 
-```bash
-curl -X POST http://localhost:8080/api/v1/intents/pi_abc123/authorize \
-  -H "Idempotency-Key: 770e8400-e29b-41d4-a716-446655440002"
-```
+- Authorization hold ID and amount
+- Authorization code from issuer
+- Hold expiration timestamp
+- Provider transaction ID
 
-### Example Response (Success)
+### Response Includes (Decline)
 
-```json
-{
-  "id": "pi_abc123",
-  "status": "authorized",
-  "provider_payment_id": "pi_stripe_xyz789",
-  "hold": {
-    "id": "hold_def456",
-    "amount": "100.00",
-    "status": "active",
-    "authorization_code": "AUTH123",
-    "expires_at": "2026-01-24T10:30:00Z"
-  },
-  "updated_at": "2026-01-17T10:35:00Z"
-}
-```
-
-### Example Response (Declined)
-
-```json
-{
-  "id": "pi_abc123",
-  "status": "requires_payment_method",
-  "last_decline": {
-    "canonical_code": "INSUFFICIENT_FUNDS",
-    "decline_type": "soft",
-    "message": "The card has insufficient funds",
-    "retry_eligible": true
-  },
-  "updated_at": "2026-01-17T10:35:00Z"
-}
-```
+- Canonical decline code (normalized across providers)
+- Decline type: `soft`, `hard`, or `fraud`
+- Whether retry is eligible
+- Human-readable decline message
 
 ---
 
 ## Capture Payment
 
-Captures previously authorized funds. For `automatic` capture, this happens automatically.
+Captures previously authorized funds. For intents with `automatic` capture, this happens immediately after authorization.
 
-### Request
-
-```
-POST /api/v1/intents/:id/capture
-```
-
-### Body Parameters (Optional)
+### Request Fields (Optional)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `amount` | string | No | Partial capture amount (must be <= authorized) |
+| `amount` | string | No | Partial capture amount (must be <= authorized amount) |
 
-### Example Request
+### Business Rules
 
-```bash
-curl -X POST http://localhost:8080/api/v1/intents/pi_abc123/capture \
-  -H "Idempotency-Key: 880e8400-e29b-41d4-a716-446655440003"
-```
-
-### Example Response
-
-```json
-{
-  "id": "pi_abc123",
-  "status": "captured",
-  "amount": "100.00",
-  "captured_amount": "100.00",
-  "captured_at": "2026-01-17T10:40:00Z",
-  "updated_at": "2026-01-17T10:40:00Z"
-}
-```
+- Can only capture an authorized intent
+- Capture amount cannot exceed authorized amount
+- Partial capture is supported (capture less than authorized)
+- After capture, the intent reaches terminal state
 
 ---
 
 ## Cancel Payment Intent
 
-Cancels a payment intent. Only valid before capture.
+Cancels a payment intent. Behavior depends on current state.
 
-### Request
-
-```
-POST /api/v1/intents/:id/cancel
-```
-
-### Body Parameters
+### Request Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `reason` | string | No | Cancellation reason |
+| `reason` | string | No | Cancellation reason for audit |
 
-### Example Request
+### Behavior by State
 
-```bash
-curl -X POST http://localhost:8080/api/v1/intents/pi_abc123/cancel \
-  -H "Content-Type: application/json" \
-  -d '{
-    "reason": "customer_request"
-  }'
-```
-
-### Example Response
-
-```json
-{
-  "id": "pi_abc123",
-  "status": "cancelled",
-  "cancellation_reason": "customer_request",
-  "cancelled_at": "2026-01-17T10:45:00Z"
-}
-```
+| Current State | Cancellation Behavior |
+|---------------|----------------------|
+| `created` | Immediate cancellation |
+| `requires_authorization` | Immediate cancellation |
+| `authorized` | Voids the authorization hold, then cancels |
+| `recovering` | Stops retry attempts, cancels |
+| `captured` | Cannot cancel (use refund instead) |
 
 ---
 
 ## Get Attempt History
 
-Returns the history of payment attempts for an intent.
+Returns the history of all payment attempts for an intent. Each retry creates a new attempt record.
 
-### Request
+### Response Fields per Attempt
 
-```
-GET /api/v1/intents/:id/attempts
-```
-
-### Example Response
-
-```json
-{
-  "data": [
-    {
-      "id": "att_001",
-      "attempt_number": 1,
-      "status": "failed",
-      "provider": "STRIPE",
-      "provider_response": "insufficient_funds",
-      "canonical_decline": "INSUFFICIENT_FUNDS",
-      "decline_type": "soft",
-      "created_at": "2026-01-17T10:35:00Z",
-      "completed_at": "2026-01-17T10:35:02Z"
-    },
-    {
-      "id": "att_002",
-      "attempt_number": 2,
-      "status": "succeeded",
-      "provider": "STRIPE",
-      "processor_txn_id": "txn_stripe_123",
-      "created_at": "2026-01-18T09:00:00Z",
-      "completed_at": "2026-01-18T09:00:03Z"
-    }
-  ],
-  "has_more": false
-}
-```
+| Field | Description |
+|-------|-------------|
+| `attempt_number` | Sequential attempt number (1, 2, 3...) |
+| `status` | Attempt outcome: `succeeded` or `failed` |
+| `provider` | Provider used for this attempt |
+| `canonical_decline` | Normalized decline code (if failed) |
+| `decline_type` | Category: `soft`, `hard`, `fraud` |
+| `created_at` | When attempt started |
+| `completed_at` | When attempt finished |
 
 ---
 
 ## Payment Intent States
 
-| State | Description | Valid Transitions |
-|-------|-------------|-------------------|
-| `created` | Intent created, no method attached | `requires_authorization`, `cancelled` |
-| `requires_authorization` | Method attached, awaiting auth | `authorized`, `recovering`, `cancelled` |
-| `authorized` | Auth approved, hold placed | `captured`, `voided`, `cancelled` |
-| `recovering` | Soft decline, retrying | `authorized`, `failed`, `cancelled` |
-| `captured` | Funds captured (terminal) | - |
-| `voided` | Authorization voided (terminal) | - |
-| `failed` | Hard decline or retries exhausted (terminal) | - |
-| `cancelled` | Manually cancelled (terminal) | - |
+### State Definitions
+
+| State | Description |
+|-------|-------------|
+| `created` | Intent created, no payment method attached |
+| `requires_authorization` | Payment method attached, awaiting authorization |
+| `authorized` | Authorization approved, hold placed on funds |
+| `recovering` | Soft decline occurred, automatic retry in progress |
+| `captured` | Funds captured successfully (terminal) |
+| `voided` | Authorization voided before capture (terminal) |
+| `failed` | Hard decline or retries exhausted (terminal) |
+| `cancelled` | Manually cancelled (terminal) |
+
+### State Transitions
+
+| From State | Valid Transitions |
+|------------|-------------------|
+| `created` | `requires_authorization`, `cancelled` |
+| `requires_authorization` | `authorized`, `recovering`, `failed`, `cancelled` |
+| `authorized` | `captured`, `voided`, `cancelled` |
+| `recovering` | `authorized`, `failed`, `cancelled` |
+
+### Terminal States
+
+Once an intent reaches `captured`, `voided`, `failed`, or `cancelled`, no further state changes are possible. Refunds are handled as separate transactions.
+
+---
+
+## Decline Handling
+
+### Decline Categories
+
+| Category | Retry Eligible | Examples |
+|----------|----------------|----------|
+| Soft | Yes | Insufficient funds, generic decline, do not honor |
+| Hard | No | Card expired, invalid number, account closed |
+| Fraud | No | Suspected fraud, stolen card, lost card |
+
+### Automatic Retry Behavior
+
+For soft declines with `capture_method: automatic`:
+- System automatically schedules retry attempts
+- Retry timing varies by decline type (e.g., insufficient funds waits for payday)
+- Maximum retry attempts is configurable (default: 6)
+- Customer can update payment method to trigger immediate retry

@@ -1,40 +1,23 @@
 # Outbox and Audit Tables
 
-Database tables for event publishing and audit trails.
+Database tables for reliable event publishing and audit trails.
 
 ## outbox
 
-Implements the transactional outbox pattern for reliable event publishing.
+Implements the transactional outbox pattern for reliable event publishing. Events are written to this table in the same transaction as business data changes, then read by CDC (Change Data Capture) and published to Kafka.
 
-```sql
-CREATE TABLE outbox (
-    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate_type    VARCHAR(50) NOT NULL,
-    aggregate_id      UUID NOT NULL,
-    event_type        VARCHAR(50) NOT NULL,
-    payload           JSONB NOT NULL,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+### Fields
 
--- Required for Debezium CDC to capture full row data
-ALTER TABLE outbox REPLICA IDENTITY FULL;
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key, used for deduplication |
+| `aggregate_type` | String(50) | Yes | Type of entity (PaymentIntent, Account) |
+| `aggregate_id` | UUID | Yes | ID of the entity |
+| `event_type` | String(50) | Yes | Canonical event type |
+| `payload` | JSON | Yes | Canonical event data |
+| `created_at` | Timestamp | Yes | Event creation time |
 
-CREATE INDEX idx_outbox_created ON outbox(created_at);
-CREATE INDEX idx_outbox_aggregate ON outbox(aggregate_type, aggregate_id);
-```
-
-### Columns
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key, used for deduplication |
-| `aggregate_type` | VARCHAR(50) | Type of entity (PaymentIntent, Account) |
-| `aggregate_id` | UUID | ID of the entity |
-| `event_type` | VARCHAR(50) | Canonical event type |
-| `payload` | JSONB | Canonical event data |
-| `created_at` | TIMESTAMPTZ | Event creation time |
-
-### Event Types (Canonical)
+### Event Types
 
 | Event Type | Description |
 |------------|-------------|
@@ -48,101 +31,55 @@ CREATE INDEX idx_outbox_aggregate ON outbox(aggregate_type, aggregate_id);
 | `payment.dispute_opened` | Chargeback initiated |
 | `account.balance_updated` | Account balance changed |
 
-### Payload Format (Canonical)
+### Payload Requirements
 
-```json
-{
-  "event_id": "evt_abc123",
-  "event_type": "payment.captured",
-  "payment_id": "pi_xyz789",
-  "amount": 10000,
-  "currency": "USD",
-  "provider": "STRIPE",
-  "captured_at": "2026-01-17T10:40:00Z",
-  "correlation_id": "req_abc123"
-}
-```
+Payload must contain only canonical fields:
+- Event ID
+- Event type
+- Entity ID
+- Amount and currency (if applicable)
+- Provider (if applicable)
+- Timestamp
+- Correlation ID for tracing
 
-**Important**: Payload contains only canonical fields. No provider-specific data.
+No provider-specific data should be included in the payload.
 
-### CDC Configuration
+### CDC Configuration Requirements
 
-Debezium connector reads outbox table changes from PostgreSQL WAL:
+- Table requires REPLICA IDENTITY FULL for complete row capture
+- Debezium connector reads PostgreSQL WAL
+- Event router transformation extracts event_type to Kafka headers
+- CDC user needs replication permissions
 
-```json
-{
-  "name": "payment-outbox-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-    "database.hostname": "postgres",
-    "database.port": "5432",
-    "database.user": "debezium",
-    "database.password": "${DB_PASSWORD}",
-    "database.dbname": "payments",
-    "table.include.list": "public.outbox",
-    "transforms": "outbox",
-    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
-    "transforms.outbox.table.fields.additional.placement": "event_type:header:eventType"
-  }
-}
-```
+### Cleanup
 
-### Cleanup Strategy
-
-Old outbox records can be archived/deleted after confirmation of Kafka delivery:
-
-```sql
--- Archive outbox records older than 7 days
-INSERT INTO outbox_archive
-SELECT * FROM outbox WHERE created_at < NOW() - INTERVAL '7 days';
-
-DELETE FROM outbox WHERE created_at < NOW() - INTERVAL '7 days';
-```
+Old outbox records should be archived/deleted after confirmed delivery:
+- Retention period: 7 days recommended
+- Archive to cold storage before deletion
+- Cleanup job should run during low-traffic periods
 
 ---
 
 ## audit_log
 
-Append-only audit trail of all significant changes. Required for compliance.
+Append-only audit trail of all significant changes. Required for regulatory compliance and debugging.
 
-```sql
-CREATE TABLE audit_log (
-    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    entity_type       VARCHAR(50) NOT NULL,
-    entity_id         UUID NOT NULL,
-    action            VARCHAR(20) NOT NULL,
-    actor_type        VARCHAR(20) NOT NULL,
-    actor_id          VARCHAR(100),
-    old_values        JSONB,
-    new_values        JSONB,
-    metadata          JSONB,
-    ip_address        INET,
-    user_agent        TEXT,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+### Fields
 
-CREATE INDEX idx_audit_entity ON audit_log(entity_type, entity_id);
-CREATE INDEX idx_audit_actor ON audit_log(actor_type, actor_id);
-CREATE INDEX idx_audit_action ON audit_log(action);
-CREATE INDEX idx_audit_created ON audit_log(created_at);
-```
-
-### Columns
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `entity_type` | VARCHAR(50) | Type of entity changed |
-| `entity_id` | UUID | ID of entity changed |
-| `action` | VARCHAR(20) | CREATE, UPDATE, DELETE |
-| `actor_type` | VARCHAR(20) | SYSTEM, USER, WEBHOOK, API |
-| `actor_id` | VARCHAR(100) | ID of actor (user ID, API key, etc.) |
-| `old_values` | JSONB | Previous field values |
-| `new_values` | JSONB | New field values |
-| `metadata` | JSONB | Additional context |
-| `ip_address` | INET | Client IP address |
-| `user_agent` | TEXT | Client user agent |
-| `created_at` | TIMESTAMPTZ | Audit timestamp |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key |
+| `entity_type` | String(50) | Yes | Type of entity changed |
+| `entity_id` | UUID | Yes | ID of entity changed |
+| `action` | String(20) | Yes | Type of action |
+| `actor_type` | String(20) | Yes | Type of actor |
+| `actor_id` | String(100) | No | ID of actor |
+| `old_values` | JSON | No | Previous field values |
+| `new_values` | JSON | No | New field values |
+| `metadata` | JSON | No | Additional context |
+| `ip_address` | IP Address | No | Client IP address |
+| `user_agent` | Text | No | Client user agent |
+| `created_at` | Timestamp | Yes | Audit timestamp |
 
 ### Entity Types
 
@@ -165,134 +102,70 @@ CREATE INDEX idx_audit_created ON audit_log(created_at);
 ### Actor Types
 
 | Type | Description |
-|--------|-------------|
+|------|-------------|
 | `SYSTEM` | Internal system operation |
 | `USER` | Authenticated user action |
 | `WEBHOOK` | Provider webhook |
 | `API` | API client |
 | `WORKFLOW` | Temporal workflow |
 
-### Example Audit Entries
+### Immutability
 
-**Payment Intent Created:**
-```json
-{
-  "entity_type": "PAYMENT_INTENT",
-  "entity_id": "pi_abc123",
-  "action": "CREATE",
-  "actor_type": "API",
-  "actor_id": "apikey_xyz",
-  "new_values": {
-    "amount": 10000,
-    "currency": "USD",
-    "status": "CREATED",
-    "provider": "STRIPE"
-  },
-  "metadata": {
-    "idempotency_key": "550e8400-e29b-41d4-a716-446655440000"
-  }
-}
-```
+This table is append-only:
+- No UPDATE operations
+- No DELETE operations
+- Corrections require new audit entries
+- Data retention per compliance requirements
 
-**Status Change from Webhook:**
-```json
-{
-  "entity_type": "PAYMENT_INTENT",
-  "entity_id": "pi_abc123",
-  "action": "STATUS_CHANGE",
-  "actor_type": "WEBHOOK",
-  "actor_id": "stripe",
-  "old_values": {
-    "status": "REQUIRES_AUTH"
-  },
-  "new_values": {
-    "status": "AUTHORIZED"
-  },
-  "metadata": {
-    "webhook_event_id": "evt_stripe_123",
-    "provider_payment_id": "pi_stripe_xyz"
-  }
-}
-```
+### Query Patterns
 
-### Querying Audit Log
-
-```sql
--- All changes to a specific payment
-SELECT * FROM audit_log
-WHERE entity_type = 'PAYMENT_INTENT' AND entity_id = :payment_id
-ORDER BY created_at;
-
--- All actions by a specific actor
-SELECT * FROM audit_log
-WHERE actor_type = 'USER' AND actor_id = :user_id
-ORDER BY created_at DESC
-LIMIT 100;
-
--- Status changes in time range
-SELECT * FROM audit_log
-WHERE action = 'STATUS_CHANGE'
-  AND created_at BETWEEN :start_date AND :end_date
-ORDER BY created_at;
-```
+The table should support efficient queries for:
+- All changes to a specific entity (entity_type + entity_id)
+- All actions by a specific actor (actor_type + actor_id)
+- Actions within a time range (created_at)
+- Status changes (action = 'STATUS_CHANGE')
 
 ---
 
 ## processed_events
 
-Tracks processed webhook events for idempotency.
+Tracks processed webhook events for idempotency. Prevents duplicate processing when providers send the same webhook multiple times.
 
-```sql
-CREATE TABLE processed_events (
-    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    provider          VARCHAR(20) NOT NULL,
-    event_id          VARCHAR(100) NOT NULL,
-    event_type        VARCHAR(50) NOT NULL,
-    processed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+### Fields
 
-    CONSTRAINT uq_processed_event UNIQUE (provider, event_id)
-);
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key |
+| `provider` | String(20) | Yes | STRIPE, ADYEN, PAYPAL |
+| `event_id` | String(100) | Yes | Provider's event ID |
+| `event_type` | String(50) | Yes | Event type received |
+| `processed_at` | Timestamp | Yes | When processed |
 
-CREATE INDEX idx_processed_provider ON processed_events(provider);
-CREATE INDEX idx_processed_at ON processed_events(processed_at);
-```
+### Constraints
 
-### Columns
+- Unique constraint on (provider, event_id)
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `provider` | VARCHAR(20) | STRIPE, ADYEN, PAYPAL |
-| `event_id` | VARCHAR(100) | Provider's event ID |
-| `event_type` | VARCHAR(50) | Event type received |
-| `processed_at` | TIMESTAMPTZ | When processed |
+### Usage Pattern
 
-### Usage
-
-```go
-func (r *EventRepo) IsProcessed(ctx context.Context, provider, eventID string) (bool, error) {
-    var exists bool
-    err := r.db.QueryRow(ctx,
-        "SELECT EXISTS(SELECT 1 FROM processed_events WHERE provider = $1 AND event_id = $2)",
-        provider, eventID,
-    ).Scan(&exists)
-    return exists, err
-}
-
-func (r *EventRepo) MarkProcessed(ctx context.Context, provider, eventID, eventType string) error {
-    _, err := r.db.Exec(ctx,
-        "INSERT INTO processed_events (provider, event_id, event_type) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-        provider, eventID, eventType,
-    )
-    return err
-}
-```
+Before processing a webhook:
+1. Check if (provider, event_id) exists
+2. If exists, return 200 without reprocessing
+3. If not exists, process webhook
+4. Insert record after successful processing
 
 ### Cleanup
 
-Old processed event records can be cleaned up:
+Old records can be deleted after retention period:
+- Retention period: 30 days recommended
+- Providers rarely retry after 7 days, but buffer provides safety
+- Cleanup job should run during low-traffic periods
 
-```sql
--- Remove records older than 30 days
-DELETE FROM processed_events WHERE processed_at < NOW() - INTERVAL '30 days';
-```
+---
+
+## Data Retention Summary
+
+| Table | Retention | Archive Strategy |
+|-------|-----------|------------------|
+| `outbox` | 7 days | Archive to cold storage |
+| `audit_log` | Per compliance (typically 7 years) | Partition by time, archive old partitions |
+| `processed_events` | 30 days | Delete without archive |

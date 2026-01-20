@@ -4,56 +4,97 @@
 
 Accepted
 
-## Context
+## Problem
 
-Payment processing involves long-running operations that may span hours or days:
+Payment processing involves long-running operations that may span hours or days. Authorization holds wait for capture. Retry workflows need intelligent scheduling. Multi-step flows can fail at any stage. We need exactly-once semantics despite distributed system challenges.
 
-- Authorization holds that wait for capture
-- Retry workflows with intelligent scheduling (align with paydays)
-- Multi-step flows with potential failures at any stage
-- Need for exactly-once semantics despite distributed system challenges
+**The core challenge**: How do we orchestrate complex, long-running payment workflows that survive failures, support durable timers, and integrate external events like webhooks?
 
-Traditional approaches have significant limitations:
+| Requirement | Why It Matters |
+|-------------|----------------|
+| Survive process crashes | Worker restarts shouldn't lose payment state |
+| Durable timers | Sleep for days (dunning retries, capture deadlines) |
+| Exactly-once semantics | Never charge a customer twice |
+| External event integration | Receive webhooks, cancellation requests |
+| Visibility | Operations team needs to see workflow state |
 
-1. **State machines in database**: Requires polling, complex failure recovery, manual retry logic
-2. **Message queues**: No built-in state persistence, complex multi-step coordination
-3. **Cron jobs**: Imprecise timing, no guaranteed delivery, stateless
+## Solutions Considered
 
-We need a solution that:
-- Survives process crashes and restarts
-- Provides durable timers (sleep for days if needed)
-- Enables exactly-once semantics
-- Supports signals for external events (webhooks)
-- Offers visibility into running workflows
+### Solution A: Database State Machine + Polling
 
-## Decision
+Store payment state in database. Background jobs poll for payments needing action.
 
-We will use **Temporal** as the workflow orchestration engine for payment processing.
+| Pros | Cons |
+|------|------|
+| Simple, no new infrastructure | Polling overhead and latency |
+| Team already knows SQL | Manual retry logic required |
+| Easy to query current state | Complex failure recovery code |
+| | No native support for long sleeps |
+| | Difficult to coordinate multi-step flows |
+
+### Solution B: Message Queues (RabbitMQ/SQS)
+
+Use message queues to trigger payment actions. Each step publishes message for next step.
+
+| Pros | Cons |
+|------|------|
+| Decoupled processing | No built-in state persistence |
+| Reliable message delivery | Complex multi-step coordination |
+| Existing team knowledge | Manual correlation of related messages |
+| | Difficult to query "current state" |
+| | No native timer support |
+
+### Solution C: AWS Step Functions
+
+Use AWS managed state machine service for workflow orchestration.
+
+| Pros | Cons |
+|------|------|
+| Fully managed, no infrastructure | Vendor lock-in to AWS |
+| Built-in state management | Limited flexibility in workflow logic |
+| Visual workflow designer | Cost increases with scale |
+| | Learning project should demonstrate infrastructure understanding |
+
+### Solution D: Temporal Workflow Engine
+
+Use Temporal for durable workflow orchestration. Workflows define the flow, activities perform side effects.
+
+| Pros | Cons |
+|------|------|
+| Durable execution survives crashes | Team needs to learn Temporal concepts |
+| Native support for long timers | Requires running Temporal server |
+| Signals for external events | Determinism constraints on workflow code |
+| Built-in activity retries | Debugging replay can be confusing |
+| Query support for current state | |
+| Battle-tested at Stripe, Uber | |
+
+## Chosen Solution
+
+**Solution D: Temporal Workflow Engine**
 
 ### Key Capabilities Used
 
 | Capability | Use Case |
 |------------|----------|
-| **Durable Execution** | Workflow survives worker restarts, picks up where it left off |
-| **Signals** | Receive provider webhooks, method updates, cancellation requests |
-| **Queries** | Expose current payment state for API status endpoints |
-| **Durable Timers** | Sleep for calculated retry times (hours/days) |
-| **Activity Retries** | Automatic retry of PSP calls with exponential backoff |
-| **Child Workflows** | Spawn recovery workflows from main payment workflow |
+| Durable Execution | Workflow survives worker restarts, picks up where it left off |
+| Signals | Receive provider webhooks, method updates, cancellation requests |
+| Queries | Expose current payment state for API status endpoints |
+| Durable Timers | Sleep for calculated retry times (hours/days) |
+| Activity Retries | Automatic retry of PSP calls with exponential backoff |
+| Child Workflows | Spawn recovery workflows from main payment workflow |
 
-### Workflow Design
+### Workflow Structure
 
-```
-PaymentWorkflow
-├── ValidateIntent (activity)
-├── SelectProvider (activity)
-├── RequestAuthorization (provider-specific activity)
-│   └── On soft decline: spawn RecoveryWorkflow
-├── WaitForCapture (signal or timer)
-├── ProcessCapture (provider-specific activity)
-├── RecordLedger (activity)
-└── WriteOutbox (activity)
-```
+| Step | Type | Purpose |
+|------|------|---------|
+| 1. Validate Intent | Activity | Verify payment data and customer |
+| 2. Select Provider | Activity | Choose PSP based on routing rules |
+| 3. Request Authorization | Activity | Call provider API for auth |
+| 3a. On Soft Decline | Child Workflow | Spawn recovery workflow for retries |
+| 4. Wait for Capture | Signal/Timer | Wait for capture request or auto-capture timer |
+| 5. Process Capture | Activity | Call provider API for capture |
+| 6. Record Ledger | Activity | Create double-entry ledger records |
+| 7. Write Outbox | Activity | Record event for CDC publishing |
 
 ### Configuration
 
@@ -63,52 +104,28 @@ PaymentWorkflow
 | Workflow Timeout | 30 days | Maximum dunning window |
 | Activity Initial Interval | 1 second | Quick first retry |
 | Activity Backoff Coefficient | 2.0 | Exponential backoff |
-| Activity Max Attempts | 3 (PSP) / 5 (DB) | Limited PSP retries, more for internal |
+| Activity Max Attempts (PSP) | 3 | Limited retries for external calls |
+| Activity Max Attempts (DB) | 5 | More retries for internal operations |
 
-## Consequences
+## Why This Solution
 
-### Positive
+| Reason | Explanation |
+|--------|-------------|
+| **Exactly-once semantics** | Activity retries combined with idempotency keys ensure payments are never duplicated, even after crashes. |
+| **Long-running support** | Workflows can sleep for days waiting for capture or scheduling retries. No polling or cron jobs needed. |
+| **Signal handling** | Webhooks from providers can be delivered as signals to the running workflow, enabling clean event-driven flows. |
+| **Visibility** | Temporal UI shows workflow state, history, and pending activities. Operations can see exactly where each payment is. |
+| **Failure handling** | Temporal manages state persistence and recovery automatically. No custom failure recovery code needed. |
+| **Production proven** | Stripe, Uber, and Netflix use Temporal for similar payment and transaction workflows. |
 
-- **Simplified failure handling**: Temporal manages state persistence and recovery
-- **Exactly-once semantics**: Through activity retry + idempotency keys
-- **Long-running support**: Native support for workflows spanning days
-- **Visibility**: Temporal UI shows workflow state, history, pending activities
-- **Signal handling**: Clean integration point for webhooks
-- **Battle-tested**: Used by Stripe, Uber, Netflix for similar use cases
+### Trade-off Acceptance
 
-### Negative
-
-- **Learning curve**: Team needs to understand Temporal concepts (determinism, activities vs workflows)
-- **Infrastructure dependency**: Requires running Temporal server cluster
-- **Debugging complexity**: Workflow replay can be confusing initially
-- **Determinism constraints**: Cannot use non-deterministic operations in workflows
-
-### Mitigations
-
-- Use official Temporal Go SDK tutorials and documentation
-- Start with simple workflows and add complexity incrementally
-- Leverage Temporal's testing framework for workflow testing
-- Strict separation between workflow code (deterministic) and activity code (side effects)
-
-## Alternatives Considered
-
-### 1. Database State Machine + Polling
-
-- **Pros**: Simple, no new infrastructure
-- **Cons**: Polling overhead, manual retry logic, no native long sleep support
-- **Rejected**: Too much custom code for failure handling
-
-### 2. AWS Step Functions
-
-- **Pros**: Managed service, no infrastructure
-- **Cons**: Vendor lock-in, limited flexibility, cost at scale
-- **Rejected**: Learning project should demonstrate infrastructure understanding
-
-### 3. Apache Airflow
-
-- **Pros**: Mature, well-known
-- **Cons**: Designed for batch processing, not real-time workflows
-- **Rejected**: Wrong tool for payment latency requirements
+| Trade-off | Mitigation |
+|-----------|------------|
+| Learning curve | Use official Temporal Go SDK tutorials; start with simple workflows |
+| Infrastructure dependency | Temporal server is well-documented; can use Temporal Cloud for managed option |
+| Determinism constraints | Strict separation: workflows are deterministic, activities handle side effects |
+| Debugging complexity | Leverage Temporal's testing framework; learn replay debugging |
 
 ## References
 

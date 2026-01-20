@@ -1,6 +1,6 @@
 # Database Schema Documentation
 
-This directory documents the PostgreSQL database schema for the payment processing service.
+PostgreSQL database schema for the payment processing service.
 
 ## Overview
 
@@ -14,134 +14,128 @@ The database is organized into several logical groups:
 | Events | `outbox` | Transactional outbox for CDC |
 | Audit | `audit_log` | Change history and compliance |
 | Configuration | `decline_code_mappings` | Provider decline code mapping |
+| Idempotency | `processed_events` | Webhook deduplication |
 
-## Schema Diagrams
+## Entity Relationships
 
 ### Core Payment Flow
 
 ```
-┌─────────────────┐     ┌─────────────────┐
-│ payment_intents │────▶│ payment_methods │
-└────────┬────────┘     └─────────────────┘
-         │
-         │ 1:1 (when authorized)
-         ▼
-┌─────────────────────┐
-│ authorization_holds │
-└────────┬────────────┘
-         │
-         │ 1:N
-         ▼
-┌─────────────────┐
-│ payment_attempts│
-└─────────────────┘
+payment_intents ──────► payment_methods
+       │
+       │ 1:1 (when authorized)
+       ▼
+authorization_holds
+       │
+       │ 1:N (each retry creates new attempt)
+       ▼
+payment_attempts
 ```
 
 ### Double-Entry Ledger
 
 ```
-┌─────────────────┐
-│    accounts     │
-└────────┬────────┘
-         │
-         │ N:1
-         ▼
-┌─────────────────┐     ┌─────────────────┐
-│ ledger_entries  │────▶│ journal_entries │
-└─────────────────┘     └─────────────────┘
+accounts
+    │
+    │ N:1
+    ▼
+ledger_entries ──────► journal_entries
 ```
 
 ## Document Index
 
-- [Core Tables](core-tables.md) - Payment intents, methods, attempts, holds
-- [Ledger Tables](ledger-tables.md) - Accounts, journal entries, ledger entries
-- [Outbox and Audit](outbox-audit.md) - Event publishing and audit trails
+| Document | Contents |
+|----------|----------|
+| [Core Tables](core-tables.md) | Payment intents, methods, attempts, holds, decline mappings |
+| [Ledger Tables](ledger-tables.md) | Accounts, journal entries, ledger entries, clearing accounts |
+| [Outbox and Audit](outbox-audit.md) | Event publishing, audit trails, processed events |
 
-## Key Design Decisions
+## Key Design Principles
 
-### 1. Decimal Precision
+### Monetary Precision
 
-All monetary values use `DECIMAL(19,4)` for precision:
-- 19 total digits accommodate large amounts
-- 4 decimal places support fractional currencies
+All monetary values must use high precision decimal storage:
+- 19 total digits to accommodate large amounts
+- 4 decimal places to support fractional currencies
+- Never use floating point for money
 
-### 2. UUID Primary Keys
+### Primary Keys
 
 All tables use UUID primary keys:
-- No sequential ID guessing
-- Safe for distributed generation
-- Suitable for external exposure
+- Prevents sequential ID enumeration
+- Safe for distributed ID generation
+- Suitable for external API exposure
 
-### 3. Timestamp Precision
+### Timestamps
 
-All timestamps use `TIMESTAMPTZ` (timestamp with time zone):
-- Microsecond precision
-- Timezone-aware storage
-- Consistent across deployments
+All timestamps must be timezone-aware with microsecond precision for accurate ordering and auditing.
 
-### 4. Immutable Patterns
+### Immutability Patterns
 
-Several tables follow append-only patterns:
-- `ledger_entries` - Never updated, corrections via new entries
-- `payment_attempts` - Each attempt is a new record
-- `audit_log` - Append-only change history
-- `outbox` - Events never modified after creation
+Several tables follow append-only patterns to maintain audit trails:
 
-### 5. Optimistic Locking
+| Table | Pattern | Rationale |
+|-------|---------|-----------|
+| `ledger_entries` | Append-only | Corrections via new entries, never updates |
+| `payment_attempts` | Append-only | Each attempt is a new record |
+| `audit_log` | Append-only | Complete change history |
+| `outbox` | Append-only | Events never modified after creation |
 
-Tables with concurrent updates use version columns:
-- `accounts.version` - Prevent lost balance updates
-- Check-and-set pattern for updates
+### Concurrency Control
 
-## Migration Files
+Tables with concurrent updates require optimistic locking:
+- `accounts` table needs version column for balance updates
+- Check-and-set pattern prevents lost updates
 
-Migrations are in `/migrations/`:
+## Migrations
 
-| File | Description |
-|------|-------------|
-| `001_create_accounts.up.sql` | Account tables |
-| `002_create_intents.up.sql` | Payment intent and method tables |
-| `003_create_holds.up.sql` | Authorization hold table |
-| `004_create_attempts.up.sql` | Payment attempt table |
-| `005_create_ledger.up.sql` | Journal and ledger entry tables |
-| `006_create_outbox.up.sql` | Outbox table for CDC |
-| `007_create_decline_mappings.up.sql` | Decline code mapping table |
-| `008_seed_decline_codes.up.sql` | Initial decline code data |
+### Migration Sequence
 
-## Running Migrations
+Migrations must be created in this order due to foreign key dependencies:
 
-```bash
-# Apply all migrations
-go run cmd/migrate/main.go up
+1. Account tables (no dependencies)
+2. Payment intent and method tables
+3. Authorization hold table (depends on intents)
+4. Payment attempt table (depends on intents)
+5. Journal and ledger entry tables (depends on accounts)
+6. Outbox table (no dependencies)
+7. Decline code mapping table (no dependencies)
+8. Seed data for decline codes
 
-# Rollback last migration
-go run cmd/migrate/main.go down
+### Migration Requirements
 
-# Check migration status
-go run cmd/migrate/main.go status
-```
+- Each migration must be reversible
+- Data migrations must be idempotent
+- Schema changes must not lock tables for extended periods
+- Test migrations against production-sized data before deployment
 
-## Connection Configuration
+## Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | - | Full connection string |
+### Connection Settings
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DATABASE_URL` | - | Full connection string (preferred) |
 | `DB_HOST` | `localhost` | Database host |
 | `DB_PORT` | `5432` | Database port |
 | `DB_NAME` | `payments` | Database name |
 | `DB_USER` | - | Database user |
 | `DB_PASSWORD` | - | Database password |
-| `DB_SSLMODE` | `disable` | SSL mode |
+| `DB_SSLMODE` | `disable` | SSL mode (require in production) |
 
-## PgBouncer
+### Connection Pooling
 
-Production uses PgBouncer for connection pooling:
+Production deployments require connection pooling via PgBouncer:
 
-```
-Application → PgBouncer (port 6432) → PostgreSQL (port 5432)
-```
+| Setting | Recommended Value | Rationale |
+|---------|-------------------|-----------|
+| Pool mode | `transaction` | Connections returned after each transaction |
+| Max connections | 20 per pool | Prevent database connection exhaustion |
+| Default pool size | 10 | Balance between availability and resources |
 
-Configuration:
-- Pool mode: `transaction`
-- Max connections per pool: 20
-- Default pool size: 10
+### CDC Requirements
+
+For the transactional outbox pattern:
+- Outbox table requires `REPLICA IDENTITY FULL` for CDC capture
+- Debezium connector reads PostgreSQL WAL
+- CDC user needs replication permissions

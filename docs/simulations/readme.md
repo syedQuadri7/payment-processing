@@ -1,6 +1,6 @@
 # Simulations
 
-This directory documents testing tools and simulation capabilities for the payment processing service.
+Testing tools and simulation requirements for the payment processing service.
 
 ## Overview
 
@@ -8,18 +8,7 @@ Testing payment systems requires simulating various webhook scenarios from payme
 
 ## Webhook Simulator
 
-The primary testing tool is located at `tools/webhook-simulator/`. See the full documentation in [tools/webhook-simulator/README.md](../../tools/webhook-simulator/README.md).
-
-### Quick Start
-
-```bash
-# Build the simulator
-cd tools/webhook-simulator
-go build -o webhook-simulator .
-
-# Send a test webhook
-./webhook-simulator send stripe payment_intent.succeeded --amount 10000
-```
+The webhook simulator is located at `tools/webhook-simulator/`. It provides capabilities to test the full webhook receiving and processing pipeline.
 
 ### Supported Providers
 
@@ -27,195 +16,176 @@ go build -o webhook-simulator .
 |----------|----------|------------------|
 | Stripe | `/webhooks/stripe` | HMAC-SHA256 with timestamp |
 | Adyen | `/webhooks/adyen` | HMAC-SHA256 |
-| PayPal | `/webhooks/paypal` | Mock headers (API verification mocked) |
+| PayPal | `/webhooks/paypal` | Mock headers (API verification mocked in test mode) |
 
-### Common Commands
+### Simulator Capabilities
 
-```bash
-# Stripe successful authorization
-./webhook-simulator send stripe payment_intent.succeeded --amount 10000
-
-# Stripe decline with insufficient funds
-./webhook-simulator send stripe payment_intent.payment_failed --decline-code insufficient_funds
-
-# Adyen authorization
-./webhook-simulator send adyen AUTHORISATION --amount 5000
-
-# PayPal capture
-./webhook-simulator send paypal PAYMENT.CAPTURE.COMPLETED --amount 7500
-
-# Test invalid signature handling
-./webhook-simulator send stripe payment_intent.succeeded --invalid-key
-```
+| Capability | Description |
+|------------|-------------|
+| Send single webhook | Simulate individual webhook events from any provider |
+| Run scenario files | Execute multi-step test flows from YAML configuration |
+| Invalid signatures | Test signature verification rejection |
+| Custom payloads | Override default values for specific test cases |
+| Timing control | Add delays between webhook steps |
+| Status verification | Validate expected HTTP response codes |
 
 ## Test Scenarios
 
-Pre-built scenario files are in `tools/webhook-simulator/scenarios/`:
+Pre-built scenario files cover common payment flows and edge cases.
 
-| Scenario | File | Description |
-|----------|------|-------------|
-| Happy Path | `auth_capture.yaml` | Authorization followed by capture |
-| Soft Declines | `decline_soft.yaml` | Retry-eligible declines |
-| Hard Declines | `decline_hard.yaml` | Non-retryable declines |
-| Fraud | `decline_fraud.yaml` | Fraud flags and disputes |
-| Invalid | `invalid.yaml` | Invalid signatures/payloads |
+### Scenario Categories
 
-### Running Scenarios
+| Scenario | Purpose | Expected Outcome |
+|----------|---------|------------------|
+| Happy Path (auth_capture) | Authorization followed by successful capture | Payment reaches CAPTURED status |
+| Soft Declines | Retry-eligible decline codes | Payment enters recovery workflow |
+| Hard Declines | Non-retryable decline codes | Payment marked FAILED immediately |
+| Fraud Declines | Fraud flags and disputes | Payment marked for review, no retry |
+| Invalid Webhooks | Missing/invalid signatures, malformed payloads | 401 or 400 responses |
 
-```bash
-# Run full auth/capture flow
-./webhook-simulator run scenarios/auth_capture.yaml
+### Scenario File Requirements
 
-# Run with verbose output
-./webhook-simulator run scenarios/decline_soft.yaml -v
+Each scenario file must define:
 
-# Stop on first error
-./webhook-simulator run scenarios/invalid.yaml --stop-on-error
-```
+| Field | Required | Description |
+|-------|----------|-------------|
+| name | Yes | Human-readable scenario name |
+| target | Yes | Service URL to send webhooks to |
+| provider | Yes | Which provider format to use |
+| steps | Yes | Ordered list of webhook events |
+
+Each step in a scenario specifies:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| event | Yes | Provider event type to simulate |
+| delay | No | Wait time before sending (for timing-sensitive tests) |
+| data | Yes | Event payload data |
+| expect_status | Yes | Expected HTTP response code |
 
 ## Testing Strategy
 
-### 1. Unit Testing Adapters
+### 1. Unit Testing (Adapter Layer)
 
-Test each adapter's event mapping and signature verification in isolation:
+Test each adapter component in isolation:
 
-```bash
-go test ./internal/adapter/stripe/... -v
-go test ./internal/adapter/adyen/... -v
-go test ./internal/adapter/paypal/... -v
-```
+| Component | What to Test |
+|-----------|--------------|
+| Signature Verification | Valid signatures pass, invalid signatures rejected |
+| Event Mapping | Provider events map to correct canonical events |
+| Decline Code Mapping | Provider decline codes map to correct canonical codes |
+| Payload Parsing | Provider JSON correctly parsed to internal structures |
 
-### 2. Integration Testing with Simulator
+### 2. Integration Testing
 
-Use the webhook simulator against a running service:
+Test the full webhook flow with a running service:
 
-```bash
-# Terminal 1: Start the service
-./payment-processing
-
-# Terminal 2: Run webhook scenarios
-cd tools/webhook-simulator
-./webhook-simulator run scenarios/auth_capture.yaml
-```
+| Test Area | What to Verify |
+|-----------|----------------|
+| Endpoint routing | Webhooks reach correct provider adapter |
+| Signature validation | Invalid signatures return 401 |
+| Event processing | Valid webhooks update payment state |
+| Idempotency | Duplicate webhooks processed only once |
+| Signal delivery | Webhooks trigger Temporal workflow signals |
 
 ### 3. End-to-End Testing
 
-Full payment flow testing:
+Test complete payment flows:
 
-1. Create a payment intent via API
-2. Simulate provider authorization webhook
-3. Capture via API
-4. Simulate capture confirmation webhook
-5. Verify ledger entries and events
+| Step | Verification |
+|------|--------------|
+| 1. Create payment intent | Intent created with CREATED status |
+| 2. Simulate authorization webhook | Status transitions to AUTHORIZED |
+| 3. Request capture via API | Capture initiated |
+| 4. Simulate capture webhook | Status transitions to CAPTURED |
+| 5. Check ledger | Double-entry records created correctly |
+| 6. Check outbox | CDC events written for each state change |
 
 ### 4. Negative Testing
 
-Test error handling:
+Test error handling and security:
 
-```bash
-# Missing signature
-./webhook-simulator send stripe payment_intent.succeeded --skip-signature
+| Test Case | Expected Behavior |
+|-----------|-------------------|
+| Missing signature header | 401 Unauthorized |
+| Invalid signature value | 401 Unauthorized |
+| Expired timestamp (replay attack) | 401 Unauthorized |
+| Malformed JSON payload | 400 Bad Request |
+| Unknown event type | 200 OK (logged but not processed) |
+| Duplicate webhook ID | 200 OK (not reprocessed) |
 
-# Invalid signature
-./webhook-simulator send stripe payment_intent.succeeded --invalid-key
-
-# Expired timestamp (replay attack protection)
-# Use scenario file with timestamp_offset
-```
-
-## Decline Code Testing
+## Decline Code Test Matrix
 
 ### Soft Declines (Retry Eligible)
 
-| Test Case | Command |
-|-----------|---------|
-| Insufficient funds | `send stripe payment_intent.payment_failed --decline-code insufficient_funds` |
-| Generic decline | `send stripe payment_intent.payment_failed --decline-code card_declined` |
-| Processing error | `send stripe payment_intent.payment_failed --decline-code processing_error` |
+| Canonical Code | Stripe Code | Adyen Code | PayPal Code |
+|----------------|-------------|------------|-------------|
+| INSUFFICIENT_FUNDS | insufficient_funds | Refused | INSUFFICIENT_FUNDS |
+| GENERIC_DECLINE | card_declined | Refused | INSTRUMENT_DECLINED |
+| PROCESSING_ERROR | processing_error | Error | INTERNAL_SERVICE_ERROR |
+| DO_NOT_HONOR | do_not_honor | Refused | DO_NOT_HONOR |
 
 ### Hard Declines (No Retry)
 
-| Test Case | Command |
-|-----------|---------|
-| Expired card | `send stripe payment_intent.payment_failed --decline-code expired_card` |
-| Invalid number | `send stripe payment_intent.payment_failed --decline-code incorrect_number` |
-| Invalid CVV | `send stripe payment_intent.payment_failed --decline-code incorrect_cvc` |
+| Canonical Code | Stripe Code | Adyen Code | PayPal Code |
+|----------------|-------------|------------|-------------|
+| CARD_EXPIRED | expired_card | Expired Card | CREDIT_CARD_EXPIRED |
+| INVALID_NUMBER | incorrect_number | Invalid Card Number | INVALID_ACCOUNT |
+| INVALID_CVV | incorrect_cvc | CVC Declined | CREDIT_CARD_CVV_CHECK_FAILED |
+| ACCOUNT_CLOSED | card_declined | Closed Account | INVALID_ACCOUNT |
 
 ### Fraud Declines
 
-| Test Case | Command |
-|-----------|---------|
-| Fraud suspicion | `send stripe payment_intent.payment_failed --decline-code fraudulent` |
-| Stolen card | `send stripe payment_intent.payment_failed --decline-code stolen_card` |
-| Lost card | `send stripe payment_intent.payment_failed --decline-code lost_card` |
-
-## Creating Custom Scenarios
-
-Create YAML scenario files for complex test flows:
-
-```yaml
-name: "Custom Payment Flow"
-target: "http://localhost:8080"
-
-scenarios:
-  - name: "authorization_then_capture"
-    provider: "stripe"
-    steps:
-      # Step 1: Authorization succeeds
-      - event: "payment_intent.succeeded"
-        delay: "0ms"
-        data:
-          payment_id: "pi_test_custom"
-          amount: 25000
-          currency: "usd"
-        expect_status: 200
-
-      # Step 2: Capture succeeds after delay
-      - event: "charge.captured"
-        delay: "500ms"
-        data:
-          payment_id: "pi_test_custom"
-          charge_id: "ch_test_custom"
-          amount: 25000
-        expect_status: 200
-```
+| Canonical Code | Stripe Code | Adyen Code | PayPal Code |
+|----------------|-------------|------------|-------------|
+| FRAUD_SUSPICION | fraudulent | Fraud | TRANSACTION_REFUSED |
+| STOLEN_CARD | stolen_card | Stolen Card | TRANSACTION_REFUSED |
+| LOST_CARD | lost_card | Lost Card | TRANSACTION_REFUSED |
 
 ## Monitoring During Tests
 
-While running simulations, monitor:
+When running simulations, monitor these components:
 
-1. **Temporal UI**: Watch workflow executions at `http://localhost:8233`
-2. **Service Logs**: Check for signature verification and event processing
-3. **Database**: Verify payment states and ledger entries
-4. **Kafka**: Confirm CDC events are published
+| Component | What to Monitor | Location |
+|-----------|-----------------|----------|
+| Temporal UI | Workflow executions, signals received, activity results | http://localhost:8233 |
+| Service logs | Signature verification, event processing, state transitions | stdout/stderr |
+| Database | Payment intent status, ledger entries, processed_events | PostgreSQL |
+| Kafka | CDC events from outbox table | Kafka consumer |
 
-## CI/CD Integration
+### Key Metrics to Track
 
-The webhook simulator can be used in automated testing:
+| Metric | Expected During Tests |
+|--------|----------------------|
+| Webhook processing latency | < 100ms per webhook |
+| Signature verification failures | Only for invalid signature tests |
+| State transition errors | None for valid webhooks |
+| Duplicate event count | Only for idempotency tests |
 
-```bash
-#!/bin/bash
-# ci-test.sh
+## CI/CD Integration Requirements
 
-# Start service in background
-./payment-processing &
-SERVICE_PID=$!
-sleep 5
+The webhook simulator should be integrated into the CI/CD pipeline:
 
-# Run test scenarios
-cd tools/webhook-simulator
-./webhook-simulator run scenarios/auth_capture.yaml --stop-on-error
-TEST_RESULT=$?
+| Stage | Tests to Run |
+|-------|--------------|
+| Unit tests | Adapter tests with mocked inputs |
+| Integration tests | Webhook simulator against test service instance |
+| End-to-end tests | Full payment flow scenarios |
+| Performance tests | High-volume webhook throughput |
 
-# Cleanup
-kill $SERVICE_PID
+### CI Environment Requirements
 
-exit $TEST_RESULT
-```
+| Requirement | Description |
+|-------------|-------------|
+| Running service | Payment processing service must be started |
+| Temporal server | Required for workflow execution |
+| PostgreSQL | Required for state persistence |
+| Test isolation | Each test run should use isolated test data |
+| Cleanup | Test data should be cleaned between runs |
 
 ## Related Documentation
 
-- [Stripe Webhooks API](../api/webhooks/stripe.md)
-- [Adyen Webhooks API](../api/webhooks/adyen.md)
-- [PayPal Webhooks API](../api/webhooks/paypal.md)
-- [Decline Code Reference](../_reference.md#canonical-decline-codes)
+- [Stripe Webhooks](../api/webhooks/stripe.md) - Stripe webhook format and decline code mapping
+- [Adyen Webhooks](../api/webhooks/adyen.md) - Adyen webhook format and decline code mapping
+- [PayPal Webhooks](../api/webhooks/paypal.md) - PayPal webhook format and decline code mapping
+- [Decline Code Mappings](../schema/core-tables.md) - Database table for provider code mappings

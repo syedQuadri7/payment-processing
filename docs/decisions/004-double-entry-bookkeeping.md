@@ -4,38 +4,71 @@
 
 Accepted
 
-## Context
+## Problem
 
-Payment systems handle money movement and must maintain accurate, auditable records. Traditional single-entry systems (one record per transaction) have limitations:
+Payment systems handle money movement and must maintain accurate, auditable records. We need a system that can prove correctness, detect errors, and provide complete audit trails.
 
-- No built-in consistency checks
-- Difficult to trace money flow
-- Hard to detect errors or fraud
-- Cannot prove balance correctness
+**The core challenge**: Traditional single-entry systems (one record per transaction) have no built-in consistency checks. Errors can go undetected, and tracing money flow is difficult.
 
-Financial institutions and payment processors like Stripe use double-entry bookkeeping which provides:
+| Single-Entry Limitation | Consequence |
+|------------------------|-------------|
+| No balance verification | Cannot prove books are correct |
+| No self-auditing | Errors may go undetected |
+| Unclear money flow | Difficult to trace transactions |
+| Limited audit trail | Compliance challenges |
 
-- Mathematical proof that books balance (total debits = total credits)
-- Self-auditing: imbalances immediately reveal problems
-- Clear audit trail of all money movement
-- Support for complex multi-party transactions
+## Solutions Considered
 
-Stripe describes this as providing **"mathematical proof of correctness"** for their 5 billion daily events.
+### Solution A: Single-Entry Ledger
 
-## Decision
+One record per transaction with running balance.
 
-We will implement **double-entry bookkeeping** with clearing account monitoring.
+| Pros | Cons |
+|------|------|
+| Simple to implement | No built-in consistency check |
+| Easy to understand | Cannot prove balance correctness |
+| Fewer records | Difficult to trace complex flows |
+| | Updates to balance are error-prone |
+
+### Solution B: Double-Entry Bookkeeping
+
+Every transaction creates balanced debit and credit entries.
+
+| Pros | Cons |
+|------|------|
+| Self-auditing (debits = credits) | More records per transaction |
+| Mathematical proof of correctness | Team needs accounting knowledge |
+| Complete audit trail | Corrections require new entries |
+| Industry standard for finance | More complex queries |
+| Clearing accounts reveal issues | |
+
+### Solution C: Event Sourcing
+
+Store all state changes as immutable events. Derive current state by replaying events.
+
+| Pros | Cons |
+|------|------|
+| Complete history | Complex to query current state |
+| Can replay to any point | Requires event store infrastructure |
+| Natural audit trail | Schema evolution challenges |
+| | Not standard accounting practice |
+
+## Chosen Solution
+
+**Solution B: Double-Entry Bookkeeping**
+
+Stripe describes this approach as providing "mathematical proof of correctness" for their 5 billion daily events.
 
 ### Core Principles
 
-1. **Every transaction creates at least two entries**: a debit and a credit
-2. **Sum of all debits must equal sum of all credits** (always)
-3. **Ledger entries are immutable**: never update, only append corrections
-4. **Clearing accounts track in-flight transactions**
+| Principle | Description |
+|-----------|-------------|
+| Balanced entries | Every transaction creates at least two entries: a debit and a credit |
+| Conservation | Sum of all debits must equal sum of all credits (always) |
+| Immutability | Ledger entries are never updated, only append corrections |
+| Clearing accounts | Track in-flight transactions with accounts that should trend to zero |
 
 ### Account Types
-
-Following standard accounting:
 
 | Type | Normal Balance | Examples |
 |------|----------------|----------|
@@ -45,143 +78,124 @@ Following standard accounting:
 | REVENUE | Credit | Transaction fees |
 | EXPENSE | Debit | Processing costs |
 
-### Transaction Examples
-
-**Authorization (hold placed):**
-```
-Debit:  Customer Available Balance     -$100
-Credit: Authorization Clearing         +$100
-```
-
-**Capture (funds claimed):**
-```
-Debit:  Authorization Clearing         -$100
-Credit: Settlement Clearing            +$100
-```
-
-**Settlement (funds transferred):**
-```
-Debit:  Settlement Clearing            -$100
-Credit: Merchant Payable               +$100
-```
-
-### Schema Design
-
-```sql
--- Accounts with multiple balance types
-CREATE TABLE accounts (
-    id                UUID PRIMARY KEY,
-    type              VARCHAR(20) NOT NULL,  -- ASSET, LIABILITY, etc.
-    owner_id          VARCHAR(50),
-    ledger_balance    DECIMAL(19,4) NOT NULL DEFAULT 0,
-    pending_balance   DECIMAL(19,4) NOT NULL DEFAULT 0,
-    available_balance DECIMAL(19,4) NOT NULL DEFAULT 0,
-    version           INTEGER NOT NULL DEFAULT 0,  -- Optimistic locking
-    created_at        TIMESTAMPTZ NOT NULL
-);
-
--- Journal entries (transaction groups)
-CREATE TABLE journal_entries (
-    id           UUID PRIMARY KEY,
-    description  TEXT NOT NULL,
-    reference_type VARCHAR(50),
-    reference_id   UUID,
-    created_at   TIMESTAMPTZ NOT NULL
-);
-
--- Individual ledger entries (append-only)
-CREATE TABLE ledger_entries (
-    id               UUID PRIMARY KEY,
-    journal_entry_id UUID REFERENCES journal_entries(id),
-    account_id       UUID REFERENCES accounts(id),
-    amount           DECIMAL(19,4) NOT NULL,
-    direction        VARCHAR(10) NOT NULL,  -- DEBIT or CREDIT
-    balance_after    DECIMAL(19,4) NOT NULL,
-    created_at       TIMESTAMPTZ NOT NULL
-);
-```
-
-### Clearing Account Monitoring
-
-Clearing accounts should tend toward zero at steady state:
-
-| Account | Purpose | Expected State |
-|---------|---------|----------------|
-| `authorization_clearing` | Holds between auth and capture | Near-zero |
-| `settlement_clearing` | Awaiting bank settlement | Varies by cycle |
-| `fee_clearing` | Collected fees awaiting disbursement | Near-zero |
-
-**Alert Rule**: Non-zero clearing balances exceeding 24 hours indicate unresolved issues requiring investigation.
-
 ### Balance Types
+
+Each account tracks multiple balance types:
 
 | Balance | Description | Calculation |
 |---------|-------------|-------------|
 | Ledger | Sum of settled entries | Immutable entry sum |
 | Pending | Authorized but unsettled | Active holds |
-| Available | Spendable funds | Ledger - pending debits |
+| Available | Spendable funds | Ledger - pending - reserved |
+| Reserved | Held for scheduled payments | Scheduled payment amounts |
 
-## Consequences
+### Transaction Patterns
 
-### Positive
+**Authorization (hold placed)**
 
-- **Self-auditing**: Books that don't balance indicate bugs immediately
-- **Complete audit trail**: Every money movement recorded
-- **Regulatory compliance**: Standard accounting practices
-- **Debugging**: Can trace exact flow of any transaction
-- **Reconciliation**: Easy to verify against external statements
+| Entry | Account | Effect |
+|-------|---------|--------|
+| Debit | Customer Available Balance | Decreases by auth amount |
+| Credit | Authorization Clearing | Increases by auth amount |
 
-### Negative
+**Capture (funds claimed)**
 
-- **More records**: Two entries per transaction minimum
-- **Complexity**: Need to understand accounting concepts
-- **Performance**: More writes per transaction
-- **Correction complexity**: Errors require correcting entries, not updates
+| Entry | Account | Effect |
+|-------|---------|--------|
+| Debit | Authorization Clearing | Decreases by capture amount |
+| Credit | Settlement Clearing | Increases by capture amount |
 
-### Mitigations
+**Settlement (funds transferred)**
 
-- Batch balance updates with optimistic locking
-- Use materialized views for frequently-queried balances
-- Build helper functions for common transaction patterns
-- Train team on basic double-entry concepts
+| Entry | Account | Effect |
+|-------|---------|--------|
+| Debit | Settlement Clearing | Decreases by settlement amount |
+| Credit | Merchant Payable | Increases by settlement amount |
 
-## Implementation Notes
+**Void (hold released)**
 
-### Ensuring Balance
+| Entry | Account | Effect |
+|-------|---------|--------|
+| Debit | Authorization Clearing | Decreases by void amount |
+| Credit | Customer Available Balance | Increases by void amount |
 
-```go
-func (r *LedgerRepo) CreateJournalEntry(ctx context.Context, entries []LedgerEntry) error {
-    // Validate debits = credits
-    var debits, credits int64
-    for _, e := range entries {
-        if e.Direction == DirectionDebit {
-            debits += e.Amount
-        } else {
-            credits += e.Amount
-        }
-    }
-    if debits != credits {
-        return ErrUnbalancedEntry
-    }
+### Clearing Account Monitoring
 
-    // Create entries in transaction
-    return r.db.Transaction(ctx, func(tx *sql.Tx) error {
-        // ... insert entries
-    })
-}
-```
+Clearing accounts should trend toward zero:
 
-### Optimistic Locking for Balances
+| Account | Purpose | Expected State |
+|---------|---------|----------------|
+| Authorization Clearing | Holds between auth and capture | Near-zero |
+| Settlement Clearing | Awaiting bank settlement | Varies by cycle |
+| Fee Clearing | Collected fees awaiting disbursement | Near-zero |
+| Refund Clearing | Refunds in progress | Near-zero |
 
-```sql
-UPDATE accounts
-SET ledger_balance = ledger_balance + $1,
-    version = version + 1,
-    updated_at = NOW()
-WHERE id = $2 AND version = $3;
-```
+**Monitoring Rules**
 
-If no rows updated, retry with fresh version.
+| Condition | Alert Level | Required Action |
+|-----------|-------------|-----------------|
+| Non-zero balance > 12 hours | Warning | Review pending transactions |
+| Non-zero balance > 24 hours | Critical | Investigate stuck transactions |
+| Balance growing continuously | Critical | Check for processing failures |
+
+### Data Model Requirements
+
+**Accounts Table**
+
+| Requirement | Description |
+|-------------|-------------|
+| Balance precision | DECIMAL(19,4) for all monetary values |
+| Multiple balances | Track ledger, pending, available, reserved separately |
+| Optimistic locking | Version column for concurrent update safety |
+| Status tracking | ACTIVE, FROZEN, CLOSED states |
+
+**Journal Entries Table**
+
+| Requirement | Description |
+|-------------|-------------|
+| Grouping | Groups related ledger entries into logical transactions |
+| Reference | Links to originating entity (payment intent, refund, etc.) |
+| Balance constraint | Total debits must equal total credits |
+
+**Ledger Entries Table**
+
+| Requirement | Description |
+|-------------|-------------|
+| Immutability | Append-only, no updates or deletes |
+| Direction | Each entry is either DEBIT or CREDIT |
+| Running balance | Track balance_after for reconciliation |
+| Amount constraint | Must be positive and non-zero |
+
+## Why This Solution
+
+| Reason | Explanation |
+|--------|-------------|
+| **Self-auditing** | If total debits don't equal total credits, there's a bug. Imbalances are immediately visible. |
+| **Mathematical proof** | The constraint that books must balance provides provable correctness of all money movement. |
+| **Complete audit trail** | Every money movement is recorded. Can trace any transaction from start to finish. |
+| **Regulatory compliance** | Double-entry is the standard for financial record-keeping. Auditors understand it. |
+| **Error detection** | Clearing accounts that don't trend to zero reveal stuck transactions or processing failures. |
+| **Reconciliation** | Easy to verify internal records against external bank statements. |
+
+### Trade-off Acceptance
+
+| Trade-off | Mitigation |
+|-----------|------------|
+| More records | Batch balance updates; use materialized views for common queries |
+| Accounting knowledge required | Train team on basic double-entry concepts |
+| Correction complexity | Build helper functions for common correction patterns |
+| More writes per transaction | Optimistic locking prevents lost updates; acceptable overhead |
+
+### Concurrency Control
+
+Balance updates require optimistic locking:
+
+| Step | Action |
+|------|--------|
+| 1. Read | Fetch current balance and version |
+| 2. Compute | Calculate new balance |
+| 3. Update | Apply update with version check |
+| 4. Retry | If version mismatch, re-read and retry |
 
 ## References
 

@@ -4,166 +4,147 @@
 
 Accepted
 
-## Context
+## Problem
 
-Payment systems need to both update database state and publish events for downstream consumers. This creates the **dual-write problem**:
+Payment systems need to both update database state and publish events for downstream consumers. When a payment is captured, we must update the payment status in the database AND publish a "payment captured" event.
 
-```
-// DANGEROUS: Dual-write pattern
-tx.Exec("UPDATE payments SET status = 'captured'")
-tx.Commit()
-kafka.Publish(PaymentCapturedEvent{...})  // What if this fails?
-```
+**The core challenge**: This creates the dual-write problem. If the database commit succeeds but the event publish fails, we have inconsistency: the database shows the payment captured, but downstream systems never receive the event.
 
-If the database commit succeeds but Kafka publish fails:
-- Database shows payment captured
-- Downstream systems never receive the event
-- Data inconsistency between systems
+| Failure Scenario | Consequence |
+|------------------|-------------|
+| DB commits, Kafka publish fails | Database says captured, consumers never notified |
+| Kafka publishes, DB commit fails | Consumers think captured, but it wasn't |
+| Partial failure during either | Unknown state, requires manual reconciliation |
 
-Distributed transactions (2PC) are theoretically possible but:
-- Complex to implement correctly
-- Reduce system availability
-- Often not supported across different systems
-- Performance overhead
+## Solutions Considered
 
-## Decision
+### Solution A: Direct Event Publishing
 
-We will use the **Transactional Outbox Pattern**:
+Publish to Kafka directly after database commit.
 
-1. Write events to an `outbox` table in the same database transaction as the business data
-2. Use Change Data Capture (CDC) via Debezium to stream outbox changes to Kafka
-3. Consumers must be idempotent (CDC guarantees at-least-once delivery)
+| Pros | Cons |
+|------|------|
+| Simple implementation | Fails if Kafka unavailable after commit |
+| Low latency | No atomicity guarantee |
+| No additional infrastructure | Lost events if publish fails |
+| | Requires manual retry logic |
 
-### Implementation
+### Solution B: Polling Publisher
 
-```sql
--- Single atomic transaction
-BEGIN;
+Write events to outbox table. Background job polls table and publishes to Kafka.
 
--- Update business state
-UPDATE payment_intents SET status = 'captured', captured_at = NOW()
-WHERE id = $1;
+| Pros | Cons |
+|------|------|
+| Atomic write (same transaction) | Polling overhead and latency |
+| No lost events | Ordering challenges with multiple pollers |
+| Simple to understand | Delivery delay based on poll interval |
+| | Table can grow large |
 
--- Record ledger entries
-INSERT INTO ledger_entries (account_id, amount, direction, ...)
-VALUES ...;
+### Solution C: Transactional Outbox with CDC
 
--- Write event to outbox (same transaction)
-INSERT INTO outbox (aggregate_type, aggregate_id, event_type, payload)
-VALUES ('PaymentIntent', $1, 'payment.captured', $2);
+Write events to outbox table in same transaction. Use Change Data Capture (Debezium) to stream changes to Kafka.
 
-COMMIT;
-```
+| Pros | Cons |
+|------|------|
+| Atomic write (same transaction) | Requires Debezium infrastructure |
+| Low latency (WAL-based) | Eventual consistency (small delay) |
+| Preserves commit order | Consumer idempotency required |
+| Minimal database load | Outbox table needs cleanup |
+| No polling overhead | |
 
-### Outbox Table Schema
+### Solution D: Saga with Compensation
 
-```sql
-CREATE TABLE outbox (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate_type  VARCHAR(50) NOT NULL,
-    aggregate_id    UUID NOT NULL,
-    event_type      VARCHAR(50) NOT NULL,
-    payload         JSONB NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+Publish event first, then update database. If database fails, publish compensation event.
 
--- Required for CDC to capture full row data
-ALTER TABLE outbox REPLICA IDENTITY FULL;
-```
+| Pros | Cons |
+|------|------|
+| Event published immediately | Complex compensation logic |
+| Works across different systems | Eventual consistency issues |
+| | Consumers see event then compensation |
+| | Difficult to reason about |
+
+## Chosen Solution
+
+**Solution C: Transactional Outbox with CDC**
+
+### How It Works
+
+| Step | Action |
+|------|--------|
+| 1. Begin transaction | Start database transaction |
+| 2. Update business state | Update payment status, record ledger entries |
+| 3. Write to outbox | Insert event record in outbox table |
+| 4. Commit transaction | Atomic commit of all changes |
+
+If any step fails, the entire transaction rolls back. No partial state.
 
 ### CDC Pipeline
 
-```
-PostgreSQL → Debezium → Kafka → Consumers
-    │                     │
-    └─ WAL changes ──────┘
-```
+| Stage | Component | Action |
+|-------|-----------|--------|
+| Source | PostgreSQL | Writes events to outbox table |
+| Capture | Debezium | Reads Write-Ahead Log (WAL) |
+| Transport | Kafka | Receives and stores events |
+| Consumer | Downstream services | Process events idempotently |
 
-Debezium reads PostgreSQL's Write-Ahead Log (WAL) and publishes changes to Kafka topics.
+Debezium reads PostgreSQL's WAL and publishes changes to Kafka, preserving commit order.
 
-### Event Content
+### Event Content Requirements
 
-Events in the outbox contain **canonical data only**:
+Events in the outbox contain canonical data only:
 
-```json
-{
-  "event_type": "payment.captured",
-  "payment_id": "pi_abc123",
-  "amount": 10000,
-  "currency": "USD",
-  "provider": "STRIPE",
-  "captured_at": "2026-01-17T10:40:00Z"
-}
-```
+| Field | Required | Description |
+|-------|----------|-------------|
+| Event ID | Yes | Unique identifier for idempotency |
+| Event Type | Yes | Canonical event type (e.g., payment.captured) |
+| Entity ID | Yes | ID of the affected entity |
+| Amount | If applicable | Amount in smallest currency unit |
+| Currency | If applicable | ISO 4217 currency code |
+| Provider | If applicable | Payment provider used |
+| Timestamp | Yes | When the event occurred |
+| Correlation ID | Yes | For distributed tracing |
 
-No provider-specific fields are included.
+No provider-specific fields in outbox events.
 
-## Consequences
+### Infrastructure Requirements
 
-### Positive
+| Component | Requirement |
+|-----------|-------------|
+| PostgreSQL | REPLICA IDENTITY FULL on outbox table |
+| Debezium | PostgreSQL connector configured for outbox table |
+| Kafka | Topic per event type or single topic with routing |
+| CDC User | Database user with replication permissions |
 
-- **Atomicity guaranteed**: Event and state change in same transaction
-- **No data loss**: Database transaction succeeds or fails atomically
-- **Low database load**: CDC reads WAL, minimal impact on production queries
-- **Event ordering**: CDC preserves commit order
-- **Replay capability**: Kafka retains events for configured retention period
+## Why This Solution
 
-### Negative
+| Reason | Explanation |
+|--------|-------------|
+| **Atomicity** | Event and state change are in the same database transaction. They succeed or fail together. |
+| **No data loss** | If the transaction commits, the event is guaranteed to be published (CDC reads committed WAL). |
+| **Low latency** | CDC typically has < 100ms delay from commit to Kafka. Much faster than polling. |
+| **Order preservation** | CDC maintains commit order. Events arrive in the order transactions committed. |
+| **Low database load** | CDC reads WAL, not production tables. Minimal impact on query performance. |
+| **Replay capability** | Kafka retains events. Consumers can replay from any offset. |
 
-- **Eventual consistency**: Small delay between DB commit and Kafka delivery
-- **Infrastructure complexity**: Requires Debezium connector and Kafka
-- **Consumer idempotency required**: At-least-once delivery means duplicates possible
-- **Outbox table growth**: Must periodically clean up processed events
+### Trade-off Acceptance
 
-### Mitigations
+| Trade-off | Mitigation |
+|-----------|------------|
+| Eventual consistency | CDC latency is typically < 100ms, acceptable for most consumers |
+| Infrastructure complexity | Debezium is well-documented; operational runbooks exist |
+| Consumer idempotency required | Consumers track processed event IDs; standard pattern |
+| Outbox table growth | Periodic cleanup job archives/deletes old records |
 
-- CDC latency typically < 100ms, acceptable for most consumers
-- Consumers track processed message IDs to handle duplicates
-- Run periodic cleanup job to archive/delete old outbox records
-- Monitor CDC lag as key operational metric
-
-## Consumer Idempotency
+### Consumer Idempotency Requirements
 
 All consumers must be idempotent:
 
-```go
-func (c *Consumer) Handle(event PaymentCapturedEvent) error {
-    // Check if already processed
-    if c.repo.EventProcessed(event.ID) {
-        return nil // Already handled
-    }
-
-    // Process event
-    err := c.processEvent(event)
-    if err != nil {
-        return err
-    }
-
-    // Mark as processed
-    c.repo.MarkProcessed(event.ID)
-    return nil
-}
-```
-
-## Alternatives Considered
-
-### 1. Direct Kafka Publishing
-
-- **Approach**: Publish to Kafka directly after DB commit
-- **Problem**: Fails if Kafka is unavailable after commit
-- **Rejected**: Violates atomicity requirement
-
-### 2. Polling Publisher
-
-- **Approach**: Background job polls outbox table and publishes
-- **Problem**: Polling overhead, ordering challenges
-- **Rejected**: CDC is more efficient and preserves ordering
-
-### 3. Saga with Compensation
-
-- **Approach**: Publish first, compensate if DB fails
-- **Problem**: Complex compensation logic, eventual consistency issues
-- **Rejected**: Outbox is simpler for this use case
+| Step | Action |
+|------|--------|
+| 1. Check | Query if event ID has been processed |
+| 2. Skip | If already processed, return success without reprocessing |
+| 3. Process | If new, process the event |
+| 4. Record | Mark event ID as processed |
 
 ## References
 

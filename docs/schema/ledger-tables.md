@@ -1,57 +1,34 @@
 # Ledger Tables
 
-Database tables implementing double-entry bookkeeping.
+Database tables implementing double-entry bookkeeping for accurate financial tracking.
 
 ## accounts
 
-Holds account balances with multiple balance types for accurate financial tracking.
+Holds account balances with multiple balance types. Supports both customer accounts and internal system accounts.
 
-```sql
-CREATE TABLE accounts (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    type                  VARCHAR(20) NOT NULL,
-    owner_id              VARCHAR(50),
-    name                  VARCHAR(100) NOT NULL,
-    currency              VARCHAR(3) NOT NULL DEFAULT 'USD',
-    ledger_balance        DECIMAL(19,4) NOT NULL DEFAULT 0,
-    pending_balance       DECIMAL(19,4) NOT NULL DEFAULT 0,
-    available_balance     DECIMAL(19,4) NOT NULL DEFAULT 0,
-    reserved_balance      DECIMAL(19,4) NOT NULL DEFAULT 0,
-    daily_limit           DECIMAL(19,4),
-    status                VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-    version               INTEGER NOT NULL DEFAULT 0,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+### Fields
 
-CREATE INDEX idx_accounts_owner ON accounts(owner_id);
-CREATE INDEX idx_accounts_type ON accounts(type);
-CREATE INDEX idx_accounts_status ON accounts(status);
-```
-
-### Columns
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `type` | VARCHAR(20) | Account type (see below) |
-| `owner_id` | VARCHAR(50) | Customer ID (null for system accounts) |
-| `name` | VARCHAR(100) | Human-readable account name |
-| `currency` | VARCHAR(3) | ISO 4217 currency code |
-| `ledger_balance` | DECIMAL(19,4) | Sum of all settled transactions |
-| `pending_balance` | DECIMAL(19,4) | Authorized but unsettled |
-| `available_balance` | DECIMAL(19,4) | Ledger minus pending debits |
-| `reserved_balance` | DECIMAL(19,4) | Reserved for scheduled payments |
-| `daily_limit` | DECIMAL(19,4) | Maximum daily outflow (optional) |
-| `status` | VARCHAR(20) | ACTIVE, FROZEN, CLOSED |
-| `version` | INTEGER | Optimistic locking version |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
-| `updated_at` | TIMESTAMPTZ | Last update timestamp |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key |
+| `type` | String(20) | Yes | Account type |
+| `owner_id` | String(50) | No | Customer ID (null for system accounts) |
+| `name` | String(100) | Yes | Human-readable account name |
+| `currency` | String(3) | Yes | ISO 4217 currency code |
+| `ledger_balance` | Decimal(19,4) | Yes | Sum of all settled transactions |
+| `pending_balance` | Decimal(19,4) | Yes | Authorized but unsettled |
+| `available_balance` | Decimal(19,4) | Yes | Ledger minus pending debits |
+| `reserved_balance` | Decimal(19,4) | Yes | Reserved for scheduled payments |
+| `daily_limit` | Decimal(19,4) | No | Maximum daily outflow |
+| `status` | String(20) | Yes | ACTIVE, FROZEN, CLOSED |
+| `version` | Integer | Yes | Optimistic locking version |
+| `created_at` | Timestamp | Yes | Creation timestamp |
+| `updated_at` | Timestamp | Yes | Last update timestamp |
 
 ### Account Types
 
-| Type | Normal Balance | Description |
-|------|----------------|-------------|
+| Type | Normal Balance | Purpose |
+|------|----------------|---------|
 | `ASSET` | Debit | Customer accounts, clearing accounts |
 | `LIABILITY` | Credit | Merchant payable, reserves |
 | `EQUITY` | Credit | Capital, retained earnings |
@@ -59,37 +36,19 @@ CREATE INDEX idx_accounts_status ON accounts(status);
 | `EXPENSE` | Debit | Processing costs |
 | `CLEARING` | Varies | In-flight transaction tracking |
 
-### Balance Calculations
+### Balance Calculation
 
-```sql
--- Available balance calculation
+```
 available_balance = ledger_balance - pending_balance - reserved_balance
-
--- After authorization (hold placed)
-UPDATE accounts SET
-    pending_balance = pending_balance + :hold_amount,
-    available_balance = ledger_balance - pending_balance - :hold_amount - reserved_balance
-WHERE id = :customer_account_id;
-
--- After capture (hold converted to settlement)
-UPDATE accounts SET
-    pending_balance = pending_balance - :capture_amount,
-    ledger_balance = ledger_balance - :capture_amount,
-    available_balance = ledger_balance - :capture_amount - pending_balance + :capture_amount - reserved_balance
-WHERE id = :customer_account_id;
 ```
 
-### Optimistic Locking
+### Concurrency Control
 
-```sql
-UPDATE accounts
-SET ledger_balance = ledger_balance + :amount,
-    version = version + 1,
-    updated_at = NOW()
-WHERE id = :account_id AND version = :expected_version;
-
--- If rows_affected = 0, retry with fresh data
-```
+The `version` field must be used for optimistic locking:
+1. Read current version with balance
+2. Compute new balance
+3. Update with WHERE version = expected_version
+4. If no rows affected, retry with fresh data
 
 ---
 
@@ -97,30 +56,16 @@ WHERE id = :account_id AND version = :expected_version;
 
 Groups related ledger entries into logical transactions. Every journal entry must balance (total debits = total credits).
 
-```sql
-CREATE TABLE journal_entries (
-    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    description       TEXT NOT NULL,
-    reference_type    VARCHAR(50),
-    reference_id      UUID,
-    posted_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+### Fields
 
-CREATE INDEX idx_journal_reference ON journal_entries(reference_type, reference_id);
-CREATE INDEX idx_journal_posted ON journal_entries(posted_at);
-```
-
-### Columns
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `description` | TEXT | Human-readable description |
-| `reference_type` | VARCHAR(50) | Type of originating entity |
-| `reference_id` | UUID | ID of originating entity |
-| `posted_at` | TIMESTAMPTZ | When the entry was posted |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key |
+| `description` | Text | Yes | Human-readable description |
+| `reference_type` | String(50) | No | Type of originating entity |
+| `reference_id` | UUID | No | ID of originating entity |
+| `posted_at` | Timestamp | Yes | When the entry was posted |
+| `created_at` | Timestamp | Yes | Creation timestamp |
 
 ### Reference Types
 
@@ -132,159 +77,105 @@ CREATE INDEX idx_journal_posted ON journal_entries(posted_at);
 | `FEE` | Fee collection |
 | `SETTLEMENT` | Bank settlement |
 
+### Balance Constraint
+
+Every journal entry must have total debits equal to total credits across its ledger entries. This can be enforced via:
+- Application-level validation before insert
+- Database trigger after commit
+- Batch reconciliation job
+
 ---
 
 ## ledger_entries
 
-Individual debit and credit entries. Append-only - never updated or deleted.
+Individual debit and credit entries. Append-only table that is never updated or deleted.
 
-```sql
-CREATE TABLE ledger_entries (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    journal_entry_id      UUID NOT NULL REFERENCES journal_entries(id),
-    account_id            UUID NOT NULL REFERENCES accounts(id),
-    amount                DECIMAL(19,4) NOT NULL,
-    direction             VARCHAR(10) NOT NULL,
-    balance_after         DECIMAL(19,4) NOT NULL,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+### Fields
 
-CREATE INDEX idx_ledger_journal ON ledger_entries(journal_entry_id);
-CREATE INDEX idx_ledger_account ON ledger_entries(account_id);
-CREATE INDEX idx_ledger_created ON ledger_entries(created_at);
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes | Primary key |
+| `journal_entry_id` | UUID | Yes | Reference to parent journal entry |
+| `account_id` | UUID | Yes | Reference to account being debited/credited |
+| `amount` | Decimal(19,4) | Yes | Entry amount (always positive, non-zero) |
+| `direction` | String(10) | Yes | DEBIT or CREDIT |
+| `balance_after` | Decimal(19,4) | Yes | Running balance after this entry |
+| `created_at` | Timestamp | Yes | Creation timestamp |
 
--- Constraint to ensure non-zero entries
-ALTER TABLE ledger_entries ADD CONSTRAINT chk_nonzero_amount CHECK (amount <> 0);
-```
+### Constraints
 
-### Columns
+- Amount must be non-zero
+- Direction must be DEBIT or CREDIT
+- Journal entry must exist
+- Account must exist
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `journal_entry_id` | UUID | Parent journal entry |
-| `account_id` | UUID | Account being debited/credited |
-| `amount` | DECIMAL(19,4) | Entry amount (always positive) |
-| `direction` | VARCHAR(10) | DEBIT or CREDIT |
-| `balance_after` | DECIMAL(19,4) | Running balance after entry |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
+### Immutability
 
-### Double-Entry Constraint
-
-Ensure journal entries balance:
-
-```sql
-CREATE OR REPLACE FUNCTION check_journal_balance()
-RETURNS TRIGGER AS $$
-DECLARE
-    debit_sum DECIMAL(19,4);
-    credit_sum DECIMAL(19,4);
-BEGIN
-    SELECT
-        COALESCE(SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE 0 END), 0),
-        COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount ELSE 0 END), 0)
-    INTO debit_sum, credit_sum
-    FROM ledger_entries
-    WHERE journal_entry_id = NEW.journal_entry_id;
-
-    -- Allow during multi-insert, check on commit
-    -- Or implement as application-level validation
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-```
+This table is append-only:
+- No UPDATE operations allowed
+- No DELETE operations allowed
+- Corrections are made by creating new offsetting entries
+- Balance_after provides running total for reconciliation
 
 ---
 
 ## Clearing Accounts
 
-Special accounts that track in-flight transactions. Non-zero balances indicate unresolved states.
+Special internal accounts that track in-flight transactions. Non-zero balances exceeding defined thresholds indicate issues requiring investigation.
 
-### Standard Clearing Accounts
+### Required Clearing Accounts
 
-```sql
--- Create clearing accounts on system initialization
-INSERT INTO accounts (type, name, currency) VALUES
-    ('CLEARING', 'Authorization Clearing', 'USD'),
-    ('CLEARING', 'Settlement Clearing', 'USD'),
-    ('CLEARING', 'Fee Clearing', 'USD'),
-    ('CLEARING', 'Refund Clearing', 'USD');
-```
-
-| Account | Purpose | Expected State |
-|---------|---------|----------------|
+| Account Name | Purpose | Expected Steady State |
+|--------------|---------|----------------------|
 | Authorization Clearing | Funds between auth and capture | Near-zero |
-| Settlement Clearing | Awaiting bank settlement | Varies by cycle |
+| Settlement Clearing | Awaiting bank settlement | Varies by settlement cycle |
 | Fee Clearing | Fees awaiting disbursement | Near-zero |
 | Refund Clearing | Refunds in progress | Near-zero |
 
-### Monitoring Query
+### Monitoring Requirements
 
-```sql
--- Alert on stale clearing balances
-SELECT
-    name,
-    ledger_balance,
-    updated_at,
-    NOW() - updated_at AS age
-FROM accounts
-WHERE type = 'CLEARING'
-  AND ledger_balance <> 0
-  AND NOW() - updated_at > INTERVAL '24 hours';
-```
+| Condition | Alert Level | Action Required |
+|-----------|-------------|-----------------|
+| Non-zero balance > 12 hours | Warning | Review pending transactions |
+| Non-zero balance > 24 hours | Critical | Investigate stuck transactions |
+| Balance growing continuously | Critical | Check for processing failures |
 
 ---
 
-## Transaction Examples
+## Ledger Transaction Patterns
 
 ### Authorization (Place Hold)
 
-```sql
--- Journal entry
-INSERT INTO journal_entries (id, description, reference_type, reference_id)
-VALUES (:je_id, 'Authorization for pi_abc123', 'PAYMENT_INTENT', :intent_id);
+When authorization succeeds, create journal entry with:
+- DEBIT to customer account (reduces available)
+- CREDIT to authorization clearing
 
--- Debit customer available, credit clearing
-INSERT INTO ledger_entries (journal_entry_id, account_id, amount, direction, balance_after)
-VALUES
-    (:je_id, :customer_account_id, 100.00, 'DEBIT', :new_customer_balance),
-    (:je_id, :auth_clearing_id, 100.00, 'CREDIT', :new_clearing_balance);
-
--- Update balances
-UPDATE accounts SET pending_balance = pending_balance + 100.00 WHERE id = :customer_account_id;
-```
+Also update customer account:
+- Increase pending_balance
+- Decrease available_balance
 
 ### Capture (Claim Held Funds)
 
-```sql
--- Journal entry
-INSERT INTO journal_entries (id, description, reference_type, reference_id)
-VALUES (:je_id, 'Capture for pi_abc123', 'PAYMENT_INTENT', :intent_id);
+When capture succeeds, create journal entry with:
+- DEBIT from authorization clearing
+- CREDIT to settlement clearing
 
--- Move from auth clearing to settlement clearing
-INSERT INTO ledger_entries (journal_entry_id, account_id, amount, direction, balance_after)
-VALUES
-    (:je_id, :auth_clearing_id, 100.00, 'DEBIT', :new_auth_clearing),
-    (:je_id, :settlement_clearing_id, 100.00, 'CREDIT', :new_settlement_clearing);
+Also update customer account:
+- Decrease pending_balance
+- Decrease ledger_balance
 
--- Update customer balances (hold converted to actual debit)
-UPDATE accounts SET
-    pending_balance = pending_balance - 100.00,
-    ledger_balance = ledger_balance - 100.00
-WHERE id = :customer_account_id;
-```
+### Settlement (Bank Transfer)
 
-### Settlement (Transfer to Merchant)
+When settlement completes, create journal entry with:
+- DEBIT from settlement clearing
+- CREDIT to merchant payable
 
-```sql
--- Journal entry
-INSERT INTO journal_entries (id, description, reference_type, reference_id)
-VALUES (:je_id, 'Settlement batch 2026-01-17', 'SETTLEMENT', :batch_id);
+### Void (Release Hold)
 
--- Move from settlement clearing to merchant payable
-INSERT INTO ledger_entries (journal_entry_id, account_id, amount, direction, balance_after)
-VALUES
-    (:je_id, :settlement_clearing_id, 10000.00, 'DEBIT', :new_settlement_clearing),
-    (:je_id, :merchant_payable_id, 10000.00, 'CREDIT', :new_merchant_payable);
-```
+When authorization is voided, create journal entry with:
+- DEBIT from authorization clearing
+- CREDIT to customer account (restores available)
+
+Also update customer account:
+- Decrease pending_balance
+- Increase available_balance

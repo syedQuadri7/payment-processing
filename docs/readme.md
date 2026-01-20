@@ -6,7 +6,8 @@ This directory contains all documentation for the Payment Processing Service pro
 
 ```
 docs/
-├── _reference.md           # Quick reference for common lookups
+├── _reference.md           # Quick navigation to all documents
+├── glossary.md             # Terms and definitions
 ├── readme.md               # This file
 ├── research/               # Background research and industry patterns
 ├── api/                    # API documentation
@@ -14,11 +15,23 @@ docs/
 │   └── webhooks/           # Provider webhook endpoints we receive
 ├── simulations/            # Webhook simulators and testing tools
 ├── decisions/              # Architectural Decision Records (ADRs)
+│   └── pending-decisions.md # Decisions awaiting input
 ├── requirements/           # Functional and non-functional requirements
 └── schema/                 # Database schema documentation
 ```
 
+## Quick Links
+
+| Document | Purpose |
+|----------|---------|
+| [Reference Index](_reference.md) | Navigate to any document by task or topic |
+| [Glossary](glossary.md) | Understand payment and technical terminology |
+| [Pending Decisions](decisions/pending-decisions.md) | **Decisions awaiting your input** |
+
 ## Document Index
+
+### Reference
+- [Glossary](glossary.md) - Terms and definitions for payment, technical, and project concepts
 
 ### Research
 - [Payment Systems Research](research/payment-systems-research.md) - Industry patterns from Stripe, Square, Adyen
@@ -37,7 +50,8 @@ docs/
 - [Simulation Overview](simulations/readme.md) - Testing with webhook simulators
 
 ### Architecture Decisions
-- [Decision Log](decisions/readme.md) - Index of all ADRs
+- [Decision Log](decisions/readme.md) - Index of all ADRs with summaries
+- [Pending Decisions](decisions/pending-decisions.md) - **17 decisions awaiting input**
 - [ADR-001: Temporal Workflow Engine](decisions/001-temporal-workflow-engine.md)
 - [ADR-002: Multi-Provider Adapter Pattern](decisions/002-multi-provider-adapters.md)
 - [ADR-003: Transactional Outbox Pattern](decisions/003-transactional-outbox.md)
@@ -60,8 +74,9 @@ This project follows a waterfall-hybrid methodology:
 1. **Research Phase** - Study industry patterns and best practices
 2. **Requirements Phase** - Define functional and non-functional requirements
 3. **Design Phase** - Document architecture decisions and technical specifications
-4. **Implementation Phase** - Build according to specifications
-5. **Testing Phase** - Validate against requirements
+4. **Decision Phase** - Review and answer [pending decisions](decisions/pending-decisions.md)
+5. **Implementation Phase** - Build according to specifications
+6. **Testing Phase** - Validate against requirements
 
 Documentation should be updated as decisions are made and before code is written.
 
@@ -85,3 +100,4 @@ From studying production payment systems at Stripe, Square, and Adyen:
 | 1.0 | Dec 2025 | Initial documentation structure |
 | 1.1 | Jan 2026 | Added production-grade patterns |
 | 1.2 | Jan 2026 | Added multi-provider adapter architecture |
+| 1.3 | Jan 2026 | Restructured ADRs, added pending decisions and glossary |
