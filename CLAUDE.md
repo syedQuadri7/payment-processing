@@ -14,7 +14,7 @@ This project follows a **waterfall-hybrid development process**. Claude assists 
 
 2. **Documentation-Driven Development** - The `docs/` folder is the source of truth. Implementation should follow what's documented in requirements and technical specs.
 
-3. **Architectural Consistency** - Follow the patterns documented in ADRs (Architectural Decision Records). Don't introduce new patterns without documenting the decision first.
+3. **Architectural Consistency** - Follow the patterns documented in finalized decisions. Don't introduce new patterns without documenting the decision first.
 
 4. **Learning Project Support** - Help explain concepts, trade-offs, and industry patterns. This project exists to learn production-grade payment system design.
 
@@ -45,7 +45,7 @@ All documentation lives in `docs/`. Start with `docs/_reference.md` for navigati
 ### When Adding Features
 
 1. Update or create documentation first
-2. Follow existing patterns from ADRs
+2. Follow existing patterns from finalized decisions
 3. Update `docs/_reference.md` if adding new documents
 
 ## Build and Run Commands

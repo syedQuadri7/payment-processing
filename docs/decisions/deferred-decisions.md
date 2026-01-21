@@ -254,5 +254,5 @@ These decisions become relevant when:
 ## See Also
 
 - [Finalized Decisions](finalized-decisions.md) - Decisions resolved with simple defaults
-- [Pending Decisions](pending-decisions.md) - Decisions still needing input
-- [ADR Index](readme.md) - Architectural decisions that have been implemented
+- [Pending Decisions](pending-decisions.md) - Template for new decisions
+- [Decision Index](readme.md) - Overview of all decisions
