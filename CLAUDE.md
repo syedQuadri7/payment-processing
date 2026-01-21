@@ -25,19 +25,22 @@ All documentation lives in `docs/`. Start with `docs/_reference.md` for navigati
 | Folder | Purpose |
 |--------|---------|
 | `docs/_reference.md` | **Start here** - Index of all documentation |
-| `docs/requirements/` | What we're building (service-requirements.md, technical-spec.md) |
+| `docs/overview.md` | Project goals, scope, and technology stack |
+| `docs/architecture/` | System design and domain model |
+| `docs/requirements/` | Functional and non-functional requirements |
+| `docs/decisions/` | Architectural decisions (finalized and deferred) |
 | `docs/research/` | Industry patterns and background research |
-| `docs/decisions/` | ADRs explaining why we made specific choices |
 | `docs/api/` | API endpoint documentation with examples |
 | `docs/schema/` | Database schema documentation |
 | `docs/simulations/` | Testing tools and webhook simulator usage |
 
 ### Before Implementing
 
-1. Check `docs/requirements/service-requirements.md` for requirements
-2. Check `docs/requirements/technical-spec.md` for implementation guidance
-3. Check `docs/decisions/` for relevant architectural decisions
-4. Check `docs/schema/` for database structure
+1. Check `docs/requirements/functional.md` for functional requirements
+2. Check `docs/requirements/non-functional.md` for quality attributes
+3. Check `docs/architecture/system-design.md` for architecture overview
+4. Check `docs/decisions/finalized-decisions.md` for implementation choices
+5. Check `docs/schema/` for database structure
 
 ### When Adding Features
 
@@ -70,7 +73,7 @@ The service runs two components in a single binary:
 - **HTTP API Server** (port 8080) - accepts payment requests, returns 202 with workflow ID
 - **Temporal Worker** - executes workflows and activities on the `payment-processing` task queue
 
-See `docs/requirements/technical-spec.md` for full architecture diagrams.
+See `docs/architecture/system-design.md` for full architecture diagrams.
 
 ### Key Components
 
@@ -87,14 +90,17 @@ See `docs/requirements/technical-spec.md` for full architecture diagrams.
 
 ## Key Architectural Patterns
 
-These are documented in `docs/decisions/`. Follow them consistently.
+These are documented in `docs/decisions/finalized-decisions.md`. Follow them consistently.
 
-| Pattern | ADR | Summary |
-|---------|-----|---------|
-| Temporal Workflows | ADR-001 | Durable execution for payment lifecycle |
-| Multi-Provider Adapters | ADR-002 | Normalize provider webhooks at the edge |
-| Transactional Outbox | ADR-003 | Reliable event publishing via CDC |
-| Double-Entry Bookkeeping | ADR-004 | Mathematical correctness for money movement |
+| Pattern | Decision | Summary |
+|---------|----------|---------|
+| Temporal Workflows | FD-011 | Durable execution for payment lifecycle |
+| Multi-Provider Adapters | FD-012 | Normalize provider webhooks at the edge |
+| Transactional Outbox | FD-013 | Reliable event publishing via CDC |
+| Double-Entry Bookkeeping | FD-014 | Mathematical correctness for money movement |
+| Failure Handling | FD-015 | Log and manual intervention for stuck workflows |
+| API Versioning | FD-016 | Stripe-style date-based versioning |
+| API Authentication | FD-017 | Key + secret pairs |
 
 ## Temporal Patterns
 

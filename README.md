@@ -192,9 +192,21 @@ payment-processing/
 
 | Document | Description |
 |----------|-------------|
-| [Research](docs/research.md) | Production patterns from Stripe, Square, Adyen |
-| [Requirements](docs/service-requirements.md) | Functional and non-functional requirements |
-| [Technical Spec](docs/technical-spec.md) | Detailed architecture and implementation guide |
+| [Documentation Index](docs/readme.md) | Start here - navigation to all docs |
+| [Project Overview](docs/overview.md) | Goals, scope, and technology stack |
+| [System Design](docs/architecture/system-design.md) | Architecture and data flow |
+| [Domain Model](docs/architecture/domain-model.md) | Entities and state machines |
+| [Functional Requirements](docs/requirements/functional.md) | What the system does |
+| [Non-Functional Requirements](docs/requirements/non-functional.md) | Performance, reliability, security |
+| [Research](docs/research/payment-systems-research.md) | Production patterns from Stripe, Square, Adyen |
+
+### Architecture Decisions
+
+| Document | Description |
+|----------|-------------|
+| [Decision Index](docs/decisions/readme.md) | Overview of all decisions |
+| [Finalized Decisions](docs/decisions/finalized-decisions.md) | 19 decisions with simple defaults |
+| [Deferred Decisions](docs/decisions/deferred-decisions.md) | 7 enterprise-scale (documented only) |
 
 ## Development
 
@@ -230,6 +242,7 @@ Events are written to an outbox table within the same database transaction as bu
 ### Idempotency with Atomic Phases
 
 Operations are broken into phases with recovery points:
+
 1. `started` - Request received
 2. `validated` - Input validated
 3. `authorized` - Provider called

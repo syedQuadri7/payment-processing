@@ -159,3 +159,80 @@ For operations on existing authorizations (capture, refund, cancellation), the `
 ### Test vs Live
 
 The `live` field indicates whether this is a test ("false") or production ("true") notification.
+
+---
+
+## Edge Cases
+
+### Unknown Payment ID (merchantReference)
+
+When a notification arrives for a merchantReference not in our database:
+
+| Cause | Handling |
+|-------|----------|
+| Payment created directly in Adyen portal | Log warning, return `[accepted]` |
+| Bug in payment creation flow | Log warning, return `[accepted]` |
+| Merchant reference mismatch | Log warning, return `[accepted]` |
+
+**Rationale:** Returning an error causes Adyen to retry for up to 7 days. Log provides visibility for investigation.
+
+### Duplicate Notifications
+
+Adyen may send the same notification multiple times. Handle idempotently:
+
+1. Track processed notifications using `pspReference` + `eventCode`
+2. On duplicate: return `[accepted]` immediately without reprocessing
+3. Different eventCodes for same pspReference are NOT duplicates (e.g., AUTHORISATION followed by CAPTURE)
+
+### Batch Processing
+
+Adyen may send multiple notifications in a single request (`notificationItems` array). Requirements:
+
+| Scenario | Handling |
+|----------|----------|
+| All items processed successfully | Return `[accepted]` |
+| Some items fail (transient error) | Return error to retry entire batch |
+| Some items have unknown merchantReference | Log warnings, still return `[accepted]` |
+
+**Processing order:** Process items sequentially within a batch. Order matters when the same payment has multiple events (auth then capture).
+
+```go
+for _, item := range notificationItems {
+    if err := processNotification(item); err != nil {
+        if isTransientError(err) {
+            return err  // Retry entire batch
+        }
+        log.Warn("failed to process notification", "error", err)
+        // Continue processing other items
+    }
+}
+return "[accepted]"
+```
+
+### Late-Arriving Notifications
+
+When a notification describes a state the payment has already passed:
+
+| Example | Handling |
+|---------|----------|
+| AUTHORISATION success arrives after CAPTURE | Log and ignore |
+| Old notification after manual resolution | Log and ignore |
+
+### Event Timing
+
+Adyen notifications may arrive with significant delay (seconds to minutes after the actual event). The `eventDate` field indicates when Adyen recorded the event, not when we received it.
+
+### Notification Delay After Maintenance
+
+After Adyen maintenance windows, there may be a burst of delayed notifications. Ensure:
+- Processing can handle high volume
+- Idempotency prevents duplicate processing
+- Late notifications are handled gracefully
+
+### Original Reference Lookup
+
+For CAPTURE, REFUND, and CANCELLATION notifications, the `originalReference` links to the original authorization. If the original authorization is not found:
+
+1. Check if we have the payment by `merchantReference`
+2. Log the orphaned notification
+3. Return `[accepted]` to prevent retries

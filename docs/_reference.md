@@ -7,28 +7,49 @@ Quick navigation to all documentation in this project.
 | Document | Purpose |
 |----------|---------|
 | [Documentation Overview](readme.md) | Start here - project overview and development process |
+| [Project Overview](overview.md) | Goals, scope, and technology stack |
 | [Glossary](glossary.md) | Terms and definitions for payment and technical concepts |
-| [Service Requirements](requirements/service-requirements.md) | What we're building and why |
-| [Technical Specification](requirements/technical-spec.md) | How we're building it |
+
+## Architecture
+
+| Document | Purpose |
+|----------|---------|
+| [System Design](architecture/system-design.md) | High-level architecture, layers, data flow |
+| [Domain Model](architecture/domain-model.md) | Entities, relationships, state machines |
+
+## Requirements
+
+| Document | Purpose |
+|----------|---------|
+| [Functional Requirements](requirements/functional.md) | What the system does (FR-xxx) |
+| [Non-Functional Requirements](requirements/non-functional.md) | Performance, reliability, security (NFR-xxx) |
 
 ## Research
 
 | Document | Purpose |
 |----------|---------|
-| [Payment Systems Research](research/payment-systems-research.md) | Industry patterns from Stripe, Square, Adyen - foundational reading for understanding our architectural choices |
+| [Payment Systems Research](research/payment-systems-research.md) | Industry patterns from Stripe, Square, Adyen |
 
 ## Architecture Decisions
 
 Why we made the choices we did. Read these to understand the reasoning behind the system design.
 
-| Document | Decision |
-|----------|----------|
-| [ADR-001](decisions/001-temporal-workflow-engine.md) | Why Temporal for workflow orchestration |
-| [ADR-002](decisions/002-multi-provider-adapters.md) | How we handle multiple payment providers |
-| [ADR-003](decisions/003-transactional-outbox.md) | How we publish events reliably |
-| [ADR-004](decisions/004-double-entry-bookkeeping.md) | How we track money movement |
-| [Decision Log](decisions/readme.md) | Index of all ADRs with summaries |
-| [Pending Decisions](decisions/pending-decisions.md) | Decisions awaiting input - **review and answer** |
+| Document | Purpose |
+|----------|---------|
+| [Decision Index](decisions/readme.md) | Overview of all decisions |
+| [Finalized Decisions](decisions/finalized-decisions.md) | 19 decisions with simple defaults for learning |
+| [Deferred Decisions](decisions/deferred-decisions.md) | 7 enterprise-scale decisions (documented only) |
+
+Key architectural decisions in finalized-decisions.md:
+- FD-011: Temporal Workflows
+- FD-012: Multi-Provider Adapters
+- FD-013: Transactional Outbox
+- FD-014: Double-Entry Ledger
+- FD-015: Failure Handling
+- FD-016: API Versioning (Stripe-style)
+- FD-017: API Authentication
+- FD-018: Timeout Handling
+- FD-019: Partial Captures
 
 ## API Documentation
 
@@ -73,21 +94,24 @@ Reference for database structure and usage patterns.
 
 ### "I need to understand the system"
 1. [Documentation Overview](readme.md)
-2. [Glossary](glossary.md) - understand the terminology
-3. [Payment Systems Research](research/payment-systems-research.md)
-4. [Service Requirements](requirements/service-requirements.md)
+2. [Project Overview](overview.md) - goals and scope
+3. [Glossary](glossary.md) - understand the terminology
+4. [System Design](architecture/system-design.md) - architecture overview
+5. [Payment Systems Research](research/payment-systems-research.md)
 
-### "I need to make a decision"
-1. [Pending Decisions](decisions/pending-decisions.md) - decisions awaiting input
-2. [Decision Log](decisions/readme.md) - how past decisions were made
+### "I need to understand a decision"
+1. [Decision Log](decisions/readme.md) - index of all decisions
+2. [Finalized Decisions](decisions/finalized-decisions.md) - simple defaults chosen
+3. [Deferred Decisions](decisions/deferred-decisions.md) - what production systems do
 
 ### "I need to implement a new feature"
-1. [Technical Specification](requirements/technical-spec.md)
-2. Relevant ADR in [decisions/](decisions/readme.md)
-3. [Schema documentation](schema/readme.md)
+1. [System Design](architecture/system-design.md)
+2. [Domain Model](architecture/domain-model.md)
+3. Relevant decision in [finalized-decisions.md](decisions/finalized-decisions.md)
+4. [Schema documentation](schema/readme.md)
 
 ### "I need to add a new payment provider"
-1. [ADR-002: Multi-Provider Adapters](decisions/002-multi-provider-adapters.md)
+1. [FD-012: Multi-Provider Adapters](decisions/finalized-decisions.md) in finalized decisions
 2. Existing webhook docs: [Stripe](api/webhooks/stripe.md), [Adyen](api/webhooks/adyen.md), [PayPal](api/webhooks/paypal.md)
 3. [Core Tables](schema/core-tables.md) - decline_code_mappings section
 

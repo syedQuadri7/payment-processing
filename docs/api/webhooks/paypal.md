@@ -160,3 +160,99 @@ PayPal supports multiple partial captures on a single authorization:
 ### Amount Format
 
 PayPal amounts are decimal strings (e.g., "100.00"), not integer smallest units. Convert appropriately when normalizing to canonical format.
+
+---
+
+## Edge Cases
+
+### Unknown Payment ID (invoice_id)
+
+When a webhook arrives for an invoice_id not in our database:
+
+| Cause | Handling |
+|-------|----------|
+| Payment created directly in PayPal | Log warning, return 200 |
+| invoice_id not set during payment creation | Log warning, return 200 |
+| Bug in payment creation flow | Log warning, return 200 |
+
+**Rationale:** Returning an error causes PayPal to retry for up to 3 days. Signature verification ensures it's a real PayPal event.
+
+### Duplicate Webhooks
+
+PayPal may send the same webhook multiple times. Handle idempotently:
+
+1. Track processed webhooks using the `id` field
+2. On duplicate: return 200 immediately without reprocessing
+3. The `id` is unique per webhook event
+
+### Verification Latency
+
+PayPal webhook verification requires an API call to PayPal. This adds latency:
+
+| Concern | Handling |
+|---------|----------|
+| Verification timeout | Return 503 (PayPal will retry) |
+| Verification failure | Return 401 (check credentials) |
+| Slow verification | Consider async processing |
+
+**Timeout consideration:** PayPal expects a response within 30 seconds. If verification takes too long, consider:
+1. Verifying asynchronously and acknowledging immediately
+2. Caching verification results briefly
+3. Using a dedicated verification service
+
+For this learning project, synchronous verification is acceptable.
+
+### Late-Arriving Webhooks
+
+When a webhook describes a state the payment has already passed:
+
+| Example | Handling |
+|---------|----------|
+| AUTHORIZATION.CREATED after CAPTURE.COMPLETED | Log and ignore |
+| CAPTURE.PENDING after CAPTURE.COMPLETED | Log and ignore |
+
+### CAPTURE.PENDING Events
+
+PayPal sends `PAYMENT.CAPTURE.PENDING` when a capture is pending review. Handling:
+
+- Do NOT update payment status to "captured" yet
+- Log the pending status
+- Wait for `PAYMENT.CAPTURE.COMPLETED` or `PAYMENT.CAPTURE.DENIED`
+
+### Dispute Resolution
+
+`CUSTOMER.DISPUTE.RESOLVED` requires checking the resolution to determine outcome:
+
+```go
+switch resource.Status {
+case "RESOLVED_BUYER_FAVOUR":
+    return EventDisputeLost
+case "RESOLVED_SELLER_FAVOUR":
+    return EventDisputeWon
+default:
+    log.Warn("unknown dispute resolution", "status", resource.Status)
+    return EventUnknown
+}
+```
+
+### Multiple Captures
+
+PayPal supports multiple partial captures. Track the `final_capture` boolean:
+
+| final_capture | Meaning |
+|---------------|---------|
+| false | More captures may follow |
+| true | Authorization fully consumed |
+
+When `final_capture` is true, any remaining authorized amount is automatically released.
+
+### Sandbox vs Production URLs
+
+Ensure webhook verification uses the correct PayPal API URL:
+
+| Environment | API URL |
+|-------------|---------|
+| Sandbox | `api-m.sandbox.paypal.com` |
+| Production | `api-m.paypal.com` |
+
+Misconfigured URLs will cause verification failures.

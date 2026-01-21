@@ -142,40 +142,116 @@ Special internal accounts that track in-flight transactions. Non-zero balances e
 
 ---
 
+## When Ledger Entries Are Created
+
+Understanding when ledger entries are created is critical for correct accounting.
+
+### Key Principle
+
+**Authorization is a promise, not money movement.** Ledger entries track actual money movement, not promises.
+
+| Event | Ledger Entry? | Balance Update? | Rationale |
+|-------|---------------|-----------------|-----------|
+| Authorization | No | Yes (pending) | Promise to pay, not actual payment |
+| Capture | Yes | Yes | Actual money movement |
+| Refund | Yes | Yes | Reversal of money movement |
+| Void | No | Yes (pending) | Cancels a promise, no money moved |
+
+### Learning Project Simplification
+
+For this learning project, we track authorizations via `pending_balance` on accounts, but do not create ledger entries until capture. This keeps the ledger focused on actual money movement.
+
+Production systems may choose to track authorization holds in the ledger for more detailed audit trails, but it adds complexity without changing the accounting fundamentals.
+
+---
+
 ## Ledger Transaction Patterns
 
 ### Authorization (Place Hold)
 
-When authorization succeeds, create journal entry with:
-- DEBIT to customer account (reduces available)
-- CREDIT to authorization clearing
+When authorization succeeds:
 
-Also update customer account:
-- Increase pending_balance
-- Decrease available_balance
+**Balance updates only (no ledger entry):**
+- Increase `pending_balance` on customer account
+- Decrease `available_balance` on customer account
+
+**Why no ledger entry?** Authorization is a promise from the card issuer that funds are available. No money has moved yet. The ledger tracks money movement, not promises.
+
+```
+Customer Account:
+  ledger_balance:    $1000.00  (unchanged)
+  pending_balance:   $100.00   (increased by auth amount)
+  available_balance: $900.00   (decreased by auth amount)
+```
 
 ### Capture (Claim Held Funds)
 
-When capture succeeds, create journal entry with:
-- DEBIT from authorization clearing
-- CREDIT to settlement clearing
+When capture succeeds, **create ledger entries** (actual money movement):
 
-Also update customer account:
-- Decrease pending_balance
-- Decrease ledger_balance
+```
+Journal Entry: "Capture payment PI-123"
+  DEBIT   Customer Account     $100.00
+  CREDIT  Settlement Clearing  $100.00
+```
+
+**Balance updates:**
+- Decrease `pending_balance` on customer account
+- Decrease `ledger_balance` on customer account
+- Increase balance on settlement clearing account
 
 ### Settlement (Bank Transfer)
 
-When settlement completes, create journal entry with:
-- DEBIT from settlement clearing
-- CREDIT to merchant payable
+When settlement completes, **create ledger entries:**
+
+```
+Journal Entry: "Settlement batch SB-456"
+  DEBIT   Settlement Clearing  $100.00
+  CREDIT  Merchant Payable     $100.00
+```
+
+This moves funds from our clearing account to the merchant's payable account.
+
+### Refund (Reverse Capture)
+
+When refund succeeds, **create ledger entries** (reversal):
+
+```
+Journal Entry: "Refund for PI-123"
+  DEBIT   Merchant Payable     $100.00
+  CREDIT  Customer Account     $100.00
+```
 
 ### Void (Release Hold)
 
-When authorization is voided, create journal entry with:
-- DEBIT from authorization clearing
-- CREDIT to customer account (restores available)
+When authorization is voided:
 
-Also update customer account:
-- Decrease pending_balance
-- Increase available_balance
+**Balance updates only (no ledger entry):**
+- Decrease `pending_balance` on customer account
+- Increase `available_balance` on customer account
+
+**Why no ledger entry?** Voiding releases the hold but no money ever moved, so there's nothing to record in the ledger.
+
+---
+
+## Summary: Entry Timing
+
+| Operation | Creates Ledger Entry | Updates Balances |
+|-----------|---------------------|------------------|
+| Authorization | No | `pending_balance` increased |
+| Capture | Yes | `ledger_balance` decreased, `pending_balance` decreased |
+| Void | No | `pending_balance` decreased |
+| Refund | Yes | `ledger_balance` increased |
+| Settlement | Yes | Clearing account decreased, merchant increased |
+
+---
+
+## Production Considerations
+
+Production systems may differ in these ways:
+
+| Aspect | Learning Approach | Production Option |
+|--------|-------------------|-------------------|
+| Auth ledger entries | None | Optional entries for audit trail |
+| Pending balance tracking | Account field | Separate holds table |
+| Multi-currency | Single currency | Separate entries per currency |
+| Settlement timing | Simplified | Complex batch reconciliation |

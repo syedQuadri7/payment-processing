@@ -1,35 +1,61 @@
-# Architectural Decision Records (ADRs)
+# Decisions
 
-This directory contains Architectural Decision Records documenting significant technical decisions made during the design and development of the payment processing service.
+This directory contains all architectural and design decisions for the payment processing service.
 
-## Decision Summary
+## Decision Categories
 
-| ADR | Decision | Summary |
-|-----|----------|---------|
-| [001](001-temporal-workflow-engine.md) | Temporal Workflow Engine | Use Temporal for durable workflow orchestration instead of database state machines or message queues. Provides exactly-once semantics, durable timers, and signal handling for long-running payment flows. |
-| [002](002-multi-provider-adapters.md) | Multi-Provider Adapter Pattern | Normalize all provider webhooks to canonical events at the edge. Core system only uses canonical types, making it provider-agnostic and easy to extend. |
-| [003](003-transactional-outbox.md) | Transactional Outbox Pattern | Write events to an outbox table in the same transaction as business data. Use CDC (Debezium) to publish to Kafka. Solves the dual-write problem without distributed transactions. |
-| [004](004-double-entry-bookkeeping.md) | Double-Entry Bookkeeping | Track all money movement with balanced debit/credit entries. Provides mathematical proof of correctness, audit trails, and self-auditing through clearing account monitoring. |
+### Finalized Decisions
 
-## Pending Decisions
+Decisions resolved with **simple defaults** appropriate for a learning project. Each notes what production systems do differently.
 
-Decisions still under consideration are documented in [pending-decisions.md](pending-decisions.md). These require input before implementation can proceed.
+See [Finalized Decisions](finalized-decisions.md) - 19 decisions:
 
-## ADR Format
+| ID | Decision | Simple Default |
+|----|----------|---------------|
+| FD-001 | Retry Timing | Fixed intervals (4h, 12h, 24h, 48h) |
+| FD-002 | Webhook Delivery | Kafka only (internal consumers) |
+| FD-003 | Idempotency Keys | Client-provided, 24h expiration |
+| FD-004 | Hold Expiration | Provider defaults, void on expire |
+| FD-005 | Rate Limiting | Global fixed limits (100 req/min) |
+| FD-006 | Sandbox | Provider test modes directly |
+| FD-007 | Payment Methods | Provider tokens only |
+| FD-008 | Disputes | Notification only, no evidence |
+| FD-009 | Audit Logs | 90-day retention in database |
+| FD-010 | Notifications | Events only via Kafka |
+| FD-011 | Temporal Workflows | Single cluster, basic config |
+| FD-012 | Multi-Provider Adapters | Static code mappings |
+| FD-013 | Transactional Outbox | CDC to Kafka (or polling) |
+| FD-014 | Double-Entry Ledger | Entries on capture/refund only |
+| FD-015 | Failure Handling | Log and manual intervention |
+| FD-016 | API Versioning | Date-based (Stripe-style) |
+| FD-017 | API Authentication | Key + secret pairs |
+| FD-018 | Timeout Handling | Fail and retry |
+| FD-019 | Partial Captures | Single partial (Stripe-style) |
 
-Each ADR follows this structure:
+### Deferred Decisions
 
-| Section | Purpose |
-|---------|---------|
-| **Status** | Proposed, Accepted, Deprecated, or Superseded |
-| **Problem** | What issue or unknown are we addressing? |
-| **Solutions Considered** | List of options with pros/cons |
-| **Chosen Solution** | Which option was selected and its details |
-| **Why This Solution** | Reasoning for the choice |
+Decisions that are **beyond the scope** of this learning project. Documented to understand what production systems need.
 
-## How to Contribute
+See [Deferred Decisions](deferred-decisions.md) - 7 decisions:
 
-1. For new decisions, add to [pending-decisions.md](pending-decisions.md) first
-2. Once a decision is made, create a new ADR file with the next number
-3. Update this readme with the decision summary
-4. Remove from pending decisions
+| ID | Decision | Why Deferred |
+|----|----------|--------------|
+| DD-001 | Database Sharding | Scale beyond learning scope |
+| DD-002 | Multi-Currency | Adds complexity without new patterns |
+| DD-003 | Smart Routing | Requires historical data and ML |
+| DD-004 | Reporting/Analytics | Consumer of data, not core processing |
+| DD-005 | Merchant KYC | Compliance domain, not payments |
+| DD-006 | SLAs | Operational commitment, not architecture |
+| DD-007 | Data Residency | Multi-region infrastructure |
+
+### Pending Decisions
+
+All decisions resolved. See [Pending Decisions](pending-decisions.md) for template to add new decisions.
+
+---
+
+## Quick Links
+
+- [Finalized Decisions](finalized-decisions.md) - 19 decisions with simple defaults
+- [Deferred Decisions](deferred-decisions.md) - 7 enterprise-scale decisions
+- [Pending Decisions](pending-decisions.md) - Template for new decisions

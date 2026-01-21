@@ -22,6 +22,14 @@ Canceling an authorization before capture. Releases the hold on the cardholder's
 
 Returning funds to a cardholder after a capture has occurred. Creates a credit transaction that reverses all or part of the original charge. May incur processing fees even though the original transaction is reversed.
 
+### Partial Capture
+
+Capturing less than the full authorized amount. Common in e-commerce when only part of an order ships. The remaining authorized amount is typically released. Different providers handle this differently: Stripe allows one partial capture, while Adyen and PayPal support multiple partial captures against a single authorization.
+
+### Over-Capture
+
+Capturing more than the original authorization. Generally not allowed for card payments. Some providers support it for specific use cases like tips (restaurant adds tip to meal authorization).
+
 ### Settlement
 
 The actual transfer of funds between banks. Occurs in batches, typically daily. The time between capture and settlement is the **settlement period**.
@@ -260,6 +268,42 @@ Hash-based Message Authentication Code. A cryptographic method to verify both da
 
 ---
 
+## API Design Terms
+
+### API Versioning
+
+A strategy for maintaining backward compatibility as APIs evolve. Common approaches include URL versioning (`/v1/`, `/v2/`) and header-based versioning (`API-Version: 2026-01-20`). Stripe uses date-based header versioning where clients pin to a specific version.
+
+### Date-Based Versioning
+
+An API versioning strategy where versions are identified by release date (e.g., `2026-01-20`). Clients pin to a version and receive consistent behavior. New versions are released periodically with documented changes. Used by Stripe, Twilio.
+
+### API Key
+
+A secret token used to authenticate API requests. Typically passed in an `Authorization` header. Should be stored securely and never exposed in client-side code.
+
+### Secret Key
+
+An API key with full access to all API operations. Used for server-side requests. Should never be exposed to clients or committed to source control. Often prefixed with `sk_` (e.g., `sk_live_abc123`).
+
+### Publishable Key
+
+An API key with limited permissions, safe for client-side use. Typically can only create tokens or perform read-only operations. Often prefixed with `pk_` (e.g., `pk_live_xyz789`).
+
+### Test Mode Key
+
+API keys prefixed with `_test_` that operate in test/sandbox mode. Transactions don't move real money. Example: `sk_test_abc123`.
+
+### Bearer Token
+
+An authentication scheme where the token is passed in the `Authorization` header as `Bearer <token>`. The most common method for API authentication.
+
+### Rate Limiting
+
+Restricting the number of API requests a client can make in a time period. Protects the system from abuse and ensures fair resource allocation. Returns HTTP 429 when exceeded.
+
+---
+
 ## Database Terms
 
 ### UUID
@@ -347,13 +391,18 @@ Mutual TLS. A security protocol where both client and server authenticate each o
 | CVV | Card Verification Value |
 | GDPR | General Data Protection Regulation |
 | HMAC | Hash-based Message Authentication Code |
+| HTTP | Hypertext Transfer Protocol |
+| JWT | JSON Web Token |
 | KYC | Know Your Customer |
 | mTLS | Mutual Transport Layer Security |
+| OAuth | Open Authorization |
 | PAN | Primary Account Number |
 | PCI | Payment Card Industry |
 | PII | Personally Identifiable Information |
 | PSP | Payment Service Provider |
+| REST | Representational State Transfer |
 | SCA | Strong Customer Authentication |
+| SDK | Software Development Kit |
 | SLA | Service Level Agreement |
 | SOC | Service Organization Control |
 | TLS | Transport Layer Security |

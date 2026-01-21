@@ -2,39 +2,111 @@
 
 This directory contains all documentation for the Payment Processing Service project. The documentation follows a waterfall-hybrid approach where design and documentation are completed before implementation.
 
+## Learning Scope
+
+This is a **learning project** focused on understanding production-grade payment processing patterns. It intentionally simplifies certain aspects to focus on core concepts.
+
+### What's Implemented
+
+| Pattern | Description | Status |
+|---------|-------------|--------|
+| Temporal Workflows | Durable execution for payment lifecycle | Implemented |
+| Multi-Provider Adapters | Normalize webhooks to canonical events | Implemented |
+| Transactional Outbox | Reliable event publishing via CDC | Implemented |
+| Double-Entry Bookkeeping | Mathematical correctness for money movement | Implemented |
+| Idempotency | Exactly-once via at-least-once + idempotent consumers | Implemented |
+
+### What's Intentionally Simplified
+
+| Feature | Learning Implementation | Production Would Add |
+|---------|------------------------|---------------------|
+| Rate limiting | Global fixed limits | Tiered per-merchant |
+| Retry timing | Fixed intervals | ML-optimized, payday-aligned |
+| Webhook delivery | Internal Kafka consumers | External HTTP endpoints |
+| Sandbox | Provider test modes | Dedicated sandbox environment |
+| Dispute handling | Notification only | Evidence collection |
+| Notifications | Events only | Email/SMS/push |
+
+See [Finalized Decisions](decisions/finalized-decisions.md) for details on each simplification.
+
+### What's Beyond Scope
+
+| Feature | Why Deferred |
+|---------|--------------|
+| Database sharding | Scale beyond learning needs |
+| Multi-currency | Complexity without new patterns |
+| Smart routing | Requires ML/historical data |
+| Merchant KYC | Compliance domain |
+
+See [Deferred Decisions](decisions/deferred-decisions.md) for what production systems implement.
+
+### Two Infrastructure Paths
+
+| Path | Use When |
+|------|----------|
+| **Simple** | Getting started, focusing on payment patterns |
+| **Production** | Learning CDC, Kafka, infrastructure patterns |
+
+See [System Design](architecture/system-design.md) for details.
+
+---
+
 ## Documentation Structure
 
 ```
 docs/
-├── _reference.md           # Quick navigation to all documents
-├── glossary.md             # Terms and definitions
-├── readme.md               # This file
-├── research/               # Background research and industry patterns
-├── api/                    # API documentation
-│   ├── internal/           # Our REST API endpoints
-│   └── webhooks/           # Provider webhook endpoints we receive
-├── simulations/            # Webhook simulators and testing tools
-├── decisions/              # Architectural Decision Records (ADRs)
-│   └── pending-decisions.md # Decisions awaiting input
-├── requirements/           # Functional and non-functional requirements
-└── schema/                 # Database schema documentation
++-- readme.md               # This file
++-- overview.md             # Project overview and learning objectives
++-- glossary.md             # Terms and definitions
++-- architecture/           # System design documentation
+|   +-- system-design.md    # High-level architecture and data flow
+|   +-- domain-model.md     # Entities, relationships, state machines
++-- requirements/           # What the system does
+|   +-- functional.md       # Functional requirements (FR-xxx)
+|   +-- non-functional.md   # Non-functional requirements (NFR-xxx)
++-- decisions/              # Architecture decisions
+|   +-- readme.md           # Decision index
+|   +-- finalized-decisions.md  # 19 decisions with simple defaults
+|   +-- deferred-decisions.md   # 7 enterprise-scale decisions
+|   +-- pending-decisions.md    # Template for new decisions
++-- api/                    # API documentation
+|   +-- internal/           # REST API endpoints
+|   +-- webhooks/           # Provider webhook receivers
++-- schema/                 # Database schema documentation
++-- research/               # Industry patterns and background
++-- simulations/            # Testing tools
 ```
 
 ## Quick Links
 
 | Document | Purpose |
 |----------|---------|
-| [Reference Index](_reference.md) | Navigate to any document by task or topic |
-| [Glossary](glossary.md) | Understand payment and technical terminology |
-| [Pending Decisions](decisions/pending-decisions.md) | **Decisions awaiting your input** |
+| [Project Overview](overview.md) | What this project is and why |
+| [Glossary](glossary.md) | Payment and technical terminology |
+| [System Design](architecture/system-design.md) | Architecture and data flow |
+| [Decision Log](decisions/readme.md) | All decisions and their status |
 
 ## Document Index
 
-### Reference
-- [Glossary](glossary.md) - Terms and definitions for payment, technical, and project concepts
+### Overview
+- [Project Overview](overview.md) - Goals, scope, technology stack
 
-### Research
-- [Payment Systems Research](research/payment-systems-research.md) - Industry patterns from Stripe, Square, Adyen
+### Architecture
+- [System Design](architecture/system-design.md) - High-level architecture, layers, data flow
+- [Domain Model](architecture/domain-model.md) - Entities, relationships, state machines
+
+### Requirements
+- [Functional Requirements](requirements/functional.md) - What the system does (FR-xxx)
+- [Non-Functional Requirements](requirements/non-functional.md) - Performance, reliability, security (NFR-xxx)
+
+### Decisions
+- [Decision Index](decisions/readme.md) - Overview of all decisions
+- [Finalized Decisions](decisions/finalized-decisions.md) - 19 decisions with simple defaults
+- [Deferred Decisions](decisions/deferred-decisions.md) - 7 enterprise-scale decisions
+- [Pending Decisions](decisions/pending-decisions.md) - Template for new decisions
+
+### Reference
+- [Glossary](glossary.md) - Terms and definitions
 
 ### API Documentation
 - [Internal API Overview](api/readme.md) - Our REST API endpoints
@@ -46,26 +118,17 @@ docs/
   - [Adyen Webhooks](api/webhooks/adyen.md) - Adyen notification handling
   - [PayPal Webhooks](api/webhooks/paypal.md) - PayPal webhook handling
 
-### Simulations
-- [Simulation Overview](simulations/readme.md) - Testing with webhook simulators
-
-### Architecture Decisions
-- [Decision Log](decisions/readme.md) - Index of all ADRs with summaries
-- [Pending Decisions](decisions/pending-decisions.md) - **17 decisions awaiting input**
-- [ADR-001: Temporal Workflow Engine](decisions/001-temporal-workflow-engine.md)
-- [ADR-002: Multi-Provider Adapter Pattern](decisions/002-multi-provider-adapters.md)
-- [ADR-003: Transactional Outbox Pattern](decisions/003-transactional-outbox.md)
-- [ADR-004: Double-Entry Bookkeeping](decisions/004-double-entry-bookkeeping.md)
-
-### Requirements
-- [Service Requirements](requirements/service-requirements.md) - Full requirements document
-- [Technical Specification](requirements/technical-spec.md) - Technical implementation spec
-
 ### Database Schema
 - [Schema Overview](schema/readme.md) - Database design documentation
 - [Core Tables](schema/core-tables.md) - Payment intents, attempts, methods
 - [Ledger Tables](schema/ledger-tables.md) - Double-entry bookkeeping schema
 - [Outbox and Audit](schema/outbox-audit.md) - Event publishing and audit trails
+
+### Research
+- [Payment Systems Research](research/payment-systems-research.md) - Industry patterns from Stripe, Square, Adyen
+
+### Simulations
+- [Simulation Overview](simulations/readme.md) - Testing with webhook simulators
 
 ## Development Process
 
@@ -74,7 +137,7 @@ This project follows a waterfall-hybrid methodology:
 1. **Research Phase** - Study industry patterns and best practices
 2. **Requirements Phase** - Define functional and non-functional requirements
 3. **Design Phase** - Document architecture decisions and technical specifications
-4. **Decision Phase** - Review and answer [pending decisions](decisions/pending-decisions.md)
+4. **Decision Phase** - Review and finalize decisions
 5. **Implementation Phase** - Build according to specifications
 6. **Testing Phase** - Validate against requirements
 
@@ -100,4 +163,5 @@ From studying production payment systems at Stripe, Square, and Adyen:
 | 1.0 | Dec 2025 | Initial documentation structure |
 | 1.1 | Jan 2026 | Added production-grade patterns |
 | 1.2 | Jan 2026 | Added multi-provider adapter architecture |
-| 1.3 | Jan 2026 | Restructured ADRs, added pending decisions and glossary |
+| 1.3 | Jan 2026 | Restructured decisions, added glossary |
+| 1.4 | Jan 2026 | Reorganized docs: separated architecture, requirements |
