@@ -4,22 +4,41 @@ A phased implementation plan for the Payment Processing Service, referencing req
 
 ---
 
-## Current State Assessment
+## Progress Tracking
 
-The codebase has foundational scaffolding:
-- Basic Temporal workflow structure (`workflow/workflow.go`)
-- Domain types defined (`internal/domain/types.go`, `payment_intent.go`, etc.)
-- Repository interfaces and PostgreSQL implementations
-- Webhook simulator tool (`tools/webhook-simulator/`)
-- Basic HTTP server with placeholder endpoints
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 1 | **Complete** | Database Foundation |
+| Phase 2 | **Complete** | Domain Layer Completion |
+| Phase 3 | **Complete** | Repository Layer Completion |
+| Phase 4 | **Complete** | Multi-Provider Webhook Adapters |
+| Phase 5 | **Complete** | Core Payment Workflow |
+| Phase 6 | **Complete** | Decline Handling and Recovery |
+| Phase 7 | **Next** | Double-Entry Ledger |
+| Phase 8 | Planned | API Layer |
+| Phase 9 | Planned | Event Publishing (Transactional Outbox) |
+| Phase 10 | Planned | Audit and Observability |
 
-**Gap**: The current workflow is a simple validate-execute pattern. The full architecture documented in `docs/architecture/system-design.md` requires significant expansion.
+---
+
+## Current State
+
+The codebase now includes:
+- Complete database schema with 14 migrations (all core tables, ledger, outbox, audit)
+- Full domain model with state machines and canonical types
+- Repository implementations with PostgreSQL
+- Multi-provider webhook adapters (Stripe, Adyen, PayPal)
+- Complete PaymentIntentWorkflow with authorization, capture, void, retry logic
+- Decline classification with database-backed code mapping
+- Payment attempt tracking with immutable records
+
+**Next**: Phase 7 (Double-Entry Ledger) implements the bookkeeping system for money movement tracking.
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Database Foundation
+### Phase 1: Database Foundation **[COMPLETE]**
 
 Establishes the persistence layer following the schema documentation.
 
@@ -57,7 +76,7 @@ Establishes the persistence layer following the schema documentation.
 
 ---
 
-### Phase 2: Domain Layer Completion
+### Phase 2: Domain Layer Completion **[COMPLETE]**
 
 Completes the domain model with all entities and business rules.
 
@@ -87,7 +106,7 @@ Completes the domain model with all entities and business rules.
 
 ---
 
-### Phase 3: Repository Layer Completion
+### Phase 3: Repository Layer Completion **[COMPLETE]**
 
 Implements all database operations with proper concurrency handling.
 
@@ -124,7 +143,7 @@ Implements all database operations with proper concurrency handling.
 
 ---
 
-### Phase 4: Multi-Provider Webhook Adapters
+### Phase 4: Multi-Provider Webhook Adapters **[COMPLETE]**
 
 Implements the adapter layer for provider webhook normalization.
 
@@ -161,7 +180,7 @@ Implements the adapter layer for provider webhook normalization.
 
 ---
 
-### Phase 5: Core Payment Workflow
+### Phase 5: Core Payment Workflow **[COMPLETE]**
 
 Implements the Temporal workflow following FD-011 patterns.
 
@@ -196,7 +215,7 @@ Implements the Temporal workflow following FD-011 patterns.
 
 ---
 
-### Phase 6: Decline Handling and Recovery
+### Phase 6: Decline Handling and Recovery **[COMPLETE]**
 
 Implements intelligent retry logic for soft declines.
 
@@ -207,28 +226,49 @@ Implements intelligent retry logic for soft declines.
 
 **Tasks:**
 
-| Task | Requirement | Priority |
-|------|-------------|----------|
-| 6.1 Implement decline classification activity | FR-DEC-01 | Must Have |
-| 6.2 Implement retry scheduling with durable timers | FD-001 | Must Have |
-| 6.3 Implement recovery workflow state (RECOVERING) | domain-model.md | Must Have |
-| 6.4 Track retry attempts and enforce maximum | FR-DEC-07 | Must Have |
-| 6.5 Implement PaymentAttempt creation for each retry | FR-DEC-06 | Must Have |
-| 6.6 Skip retry for hard declines and fraud | FR-DEC-05 | Must Have |
-| 6.7 Support immediate retry on payment method update | FR-DEC-09 | Should Have |
+| Task | Requirement | Status |
+|------|-------------|--------|
+| 6.1 Implement decline classification activity | FR-DEC-01 | Done |
+| 6.2 Implement retry scheduling with durable timers | FD-001 | Done |
+| 6.3 Implement recovery workflow state (RECOVERING) | domain-model.md | Done |
+| 6.4 Track retry attempts and enforce maximum | FR-DEC-07 | Done |
+| 6.5 Implement PaymentAttempt creation for each retry | FR-DEC-06 | Done |
+| 6.6 Skip retry for hard declines and fraud | FR-DEC-05 | Done |
+| 6.7 Support immediate retry on payment method update | FR-DEC-09 | Done |
 
-**Deliverables:**
-- Recovery workflow logic in `workflow/payment_workflow.go`
-- Decline classification in `workflow/activities/`
-- Tests for retry timing and exhaustion
+**Implementation Summary:**
+
+Activities added to `workflow/persistence_activities.go`:
+- `ClassifyDecline` - Looks up provider-specific decline codes from `decline_code_mappings` table, returns canonical classification with retry eligibility
+- `CreatePaymentAttempt` - Creates immutable attempt record in PENDING status
+- `CompletePaymentAttempt` - Updates attempt with final status and decline details
+
+Workflow changes in `workflow/payment_intent_workflow.go`:
+- Authorization loop generates unique attempt IDs via `workflow.SideEffect`
+- Creates attempt record before each authorization call
+- Calls `ClassifyDecline` to map provider codes to canonical codes
+- Completes attempt with classification results
+- `waitWithSignals` now listens for payment method update signal during RECOVERING state
+- Immediate retry triggered when payment method updated (skips remaining wait)
+
+Repository interfaces added to `workflow/activities.go`:
+- `DeclineCodeRepository` - For database decline code lookup
+- `PaymentAttemptRepository` - For attempt persistence
+- `NewActivitiesWithDependencies` constructor for production use
+
+**Tests:**
+- `TestPaymentIntentWorkflow_ImmediateRetryOnPaymentMethodUpdate` - Verifies FR-DEC-09
+- `TestPaymentIntentWorkflow_ClassifyDecline` - Verifies FR-DEC-01
+- Updated existing tests to mock new activities
 
 **Validation:**
-- Soft declines trigger automatic retry with correct intervals
+- Soft declines trigger automatic retry with correct intervals (4h, 12h, 24h, 48h)
 - Hard declines and fraud immediately fail without retry
+- Payment method update during recovery triggers immediate retry
 
 ---
 
-### Phase 7: Double-Entry Ledger
+### Phase 7: Double-Entry Ledger **[NEXT]**
 
 Implements the bookkeeping system.
 
