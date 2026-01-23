@@ -9,6 +9,7 @@ Quick navigation to all documentation in this project.
 | [Documentation Overview](readme.md) | Start here - project overview and development process |
 | [Project Overview](overview.md) | Goals, scope, and technology stack |
 | [Glossary](glossary.md) | Terms and definitions for payment and technical concepts |
+| [Implementation Plan](implementation-plan.md) | Phased implementation roadmap with task breakdown |
 
 ## Architecture
 
