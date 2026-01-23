@@ -97,7 +97,89 @@ func (a *Activities) GetPaymentIntent(ctx context.Context, input GetPaymentInten
 	}, nil
 }
 
-// RecordPaymentAttemptInput contains data for recording an attempt
+// CreatePaymentAttemptInput contains data for creating a new attempt record
+type CreatePaymentAttemptInput struct {
+	ID              string               `json:"id"`
+	PaymentIntentID string               `json:"payment_intent_id"`
+	AttemptNumber   int                  `json:"attempt_number"`
+	Provider        domain.Provider      `json:"provider"`
+	IdempotencyKey  string               `json:"idempotency_key"`
+}
+
+// CreatePaymentAttemptResult contains the created attempt ID
+type CreatePaymentAttemptResult struct {
+	AttemptID string `json:"attempt_id"`
+}
+
+// CreatePaymentAttempt creates a new payment attempt record in PENDING status
+func (a *Activities) CreatePaymentAttempt(ctx context.Context, input CreatePaymentAttemptInput) (*CreatePaymentAttemptResult, error) {
+	logger := activity.GetLogger(ctx)
+	logger.Info("Creating payment attempt",
+		"payment_intent_id", input.PaymentIntentID,
+		"attempt_number", input.AttemptNumber,
+	)
+
+	if a.PaymentAttemptRepo != nil {
+		attempt := &domain.PaymentAttempt{
+			ID:              input.ID,
+			PaymentIntentID: input.PaymentIntentID,
+			AttemptNumber:   input.AttemptNumber,
+			Status:          domain.AttemptStatusPending,
+			Provider:        input.Provider,
+			IdempotencyKey:  input.IdempotencyKey,
+		}
+
+		if err := a.PaymentAttemptRepo.Create(ctx, attempt); err != nil {
+			return nil, err
+		}
+	}
+
+	return &CreatePaymentAttemptResult{
+		AttemptID: input.ID,
+	}, nil
+}
+
+// CompletePaymentAttemptInput contains data for completing an attempt
+type CompletePaymentAttemptInput struct {
+	AttemptID           string                      `json:"attempt_id"`
+	Status              domain.AttemptStatus        `json:"status"`
+	ProviderResponseCode *string                    `json:"provider_response_code,omitempty"`
+	CanonicalDeclineCode *domain.CanonicalDeclineCode `json:"canonical_decline_code,omitempty"`
+	DeclineType         *domain.DeclineType         `json:"decline_type,omitempty"`
+	ProcessorTxnID      *string                     `json:"processor_txn_id,omitempty"`
+}
+
+// CompletePaymentAttempt marks an attempt as completed with result details
+func (a *Activities) CompletePaymentAttempt(ctx context.Context, input CompletePaymentAttemptInput) error {
+	logger := activity.GetLogger(ctx)
+	logger.Info("Completing payment attempt",
+		"attempt_id", input.AttemptID,
+		"status", input.Status,
+	)
+
+	if a.PaymentAttemptRepo != nil {
+		var declineCode *string
+		if input.CanonicalDeclineCode != nil {
+			code := string(*input.CanonicalDeclineCode)
+			declineCode = &code
+		}
+
+		if err := a.PaymentAttemptRepo.MarkCompleted(
+			ctx,
+			input.AttemptID,
+			input.Status,
+			input.ProviderResponseCode,
+			declineCode,
+			input.DeclineType,
+		); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// RecordPaymentAttemptInput contains data for recording an attempt (legacy - use Create/Complete instead)
 type RecordPaymentAttemptInput struct {
 	PaymentIntentID string               `json:"payment_intent_id"`
 	AttemptNumber   int                  `json:"attempt_number"`
@@ -110,7 +192,7 @@ type RecordPaymentAttemptInput struct {
 	IdempotencyKey  string               `json:"idempotency_key"`
 }
 
-// RecordPaymentAttempt records a payment attempt in the database
+// RecordPaymentAttempt records a payment attempt in the database (legacy - use Create/Complete instead)
 func (a *Activities) RecordPaymentAttempt(ctx context.Context, input RecordPaymentAttemptInput) error {
 	logger := activity.GetLogger(ctx)
 	logger.Info("Recording payment attempt",
@@ -119,11 +201,90 @@ func (a *Activities) RecordPaymentAttempt(ctx context.Context, input RecordPayme
 		"status", input.Status,
 	)
 
-	// TODO: Write to payment_attempts table
+	// This is a legacy activity - new code should use CreatePaymentAttempt + CompletePaymentAttempt
 	return nil
 }
 
 // MarshalEventPayload marshals a canonical event to JSON for outbox
 func MarshalEventPayload(event *domain.CanonicalEvent) ([]byte, error) {
 	return json.Marshal(event)
+}
+
+// ClassifyDeclineInput contains data for decline classification lookup
+type ClassifyDeclineInput struct {
+	Provider     domain.Provider `json:"provider"`
+	ProviderCode string          `json:"provider_code"`
+}
+
+// ClassifyDeclineResult contains the classified decline information
+type ClassifyDeclineResult struct {
+	Found           bool                       `json:"found"`
+	CanonicalCode   domain.CanonicalDeclineCode `json:"canonical_code,omitempty"`
+	DeclineType     domain.DeclineType         `json:"decline_type,omitempty"`
+	RetryEligible   bool                       `json:"retry_eligible"`
+	Description     string                     `json:"description,omitempty"`
+	SuggestedAction string                     `json:"suggested_action,omitempty"`
+}
+
+// ClassifyDecline looks up a provider-specific decline code and returns its canonical classification
+func (a *Activities) ClassifyDecline(ctx context.Context, input ClassifyDeclineInput) (*ClassifyDeclineResult, error) {
+	logger := activity.GetLogger(ctx)
+	logger.Info("Classifying decline code",
+		"provider", input.Provider,
+		"provider_code", input.ProviderCode,
+	)
+
+	// Try database lookup first if repository is available
+	if a.DeclineCodeRepo != nil {
+		mapping, err := a.DeclineCodeRepo.GetByProviderCode(ctx, input.Provider, input.ProviderCode)
+		if err != nil {
+			logger.Warn("Failed to lookup decline code from database, falling back to in-memory",
+				"error", err,
+			)
+		} else if mapping != nil {
+			description := ""
+			if mapping.Description != nil {
+				description = *mapping.Description
+			}
+			suggestedAction := ""
+			if mapping.SuggestedAction != nil {
+				suggestedAction = *mapping.SuggestedAction
+			}
+			return &ClassifyDeclineResult{
+				Found:           true,
+				CanonicalCode:   mapping.ToCanonicalDeclineCode(),
+				DeclineType:     mapping.DeclineType,
+				RetryEligible:   mapping.RetryEligible,
+				Description:     description,
+				SuggestedAction: suggestedAction,
+			}, nil
+		}
+	}
+
+	// Fall back to in-memory lookup from domain.CanonicalDeclineCodes
+	// This handles cases where the provider code matches the canonical code
+	canonicalCode := domain.CanonicalDeclineCode(input.ProviderCode)
+	if info, ok := domain.GetDeclineInfo(canonicalCode); ok {
+		return &ClassifyDeclineResult{
+			Found:           true,
+			CanonicalCode:   info.Code,
+			DeclineType:     info.Type,
+			RetryEligible:   info.RetryEligible,
+			Description:     info.Description,
+			SuggestedAction: info.SuggestedAction,
+		}, nil
+	}
+
+	// Unknown decline code - default to soft decline (retry eligible)
+	// This is a safe default as it allows retry attempts
+	logger.Warn("Unknown decline code, defaulting to soft decline",
+		"provider", input.Provider,
+		"provider_code", input.ProviderCode,
+	)
+	return &ClassifyDeclineResult{
+		Found:         false,
+		DeclineType:   domain.DeclineTypeSoft,
+		RetryEligible: true,
+		Description:   "Unknown decline code",
+	}, nil
 }
