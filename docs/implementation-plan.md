@@ -14,8 +14,8 @@ A phased implementation plan for the Payment Processing Service, referencing req
 | Phase 4 | **Complete** | Multi-Provider Webhook Adapters |
 | Phase 5 | **Complete** | Core Payment Workflow |
 | Phase 6 | **Complete** | Decline Handling and Recovery |
-| Phase 7 | **Next** | Double-Entry Ledger |
-| Phase 8 | Planned | API Layer |
+| Phase 7 | **Complete** | Double-Entry Ledger |
+| Phase 8 | **Next** | API Layer |
 | Phase 9 | Planned | Event Publishing (Transactional Outbox) |
 | Phase 10 | Planned | Audit and Observability |
 
@@ -31,8 +31,10 @@ The codebase now includes:
 - Complete PaymentIntentWorkflow with authorization, capture, void, retry logic
 - Decline classification with database-backed code mapping
 - Payment attempt tracking with immutable records
+- Double-entry ledger activities for bookkeeping (authorization holds, captures, refunds)
+- Clearing account monitoring with threshold-based alerts
 
-**Next**: Phase 7 (Double-Entry Ledger) implements the bookkeeping system for money movement tracking.
+**Next**: Phase 8 (API Layer) implements the REST API endpoints for payment operations.
 
 ---
 
@@ -268,7 +270,7 @@ Repository interfaces added to `workflow/activities.go`:
 
 ---
 
-### Phase 7: Double-Entry Ledger **[NEXT]**
+### Phase 7: Double-Entry Ledger **[COMPLETE]**
 
 Implements the bookkeeping system.
 
@@ -279,25 +281,55 @@ Implements the bookkeeping system.
 
 **Tasks:**
 
-| Task | Requirement | Priority |
-|------|-------------|----------|
-| 7.1 Implement journal entry creation with balance validation | FR-LED-03 | Must Have |
-| 7.2 Implement ledger entry creation (append-only) | FR-LED-04 | Must Have |
-| 7.3 Implement capture ledger activity | ledger-tables.md | Must Have |
-| 7.4 Implement refund ledger activity | ledger-tables.md | Must Have |
-| 7.5 Implement pending balance updates for authorization | ledger-tables.md | Must Have |
-| 7.6 Implement pending balance updates for void | ledger-tables.md | Must Have |
-| 7.7 Implement clearing account balance monitoring | FR-LED-06 | Should Have |
-| 7.8 Add reconciliation query support | FR-LED-07 | Should Have |
+| Task | Requirement | Status |
+|------|-------------|--------|
+| 7.1 Implement journal entry creation with balance validation | FR-LED-03 | Done |
+| 7.2 Implement ledger entry creation (append-only) | FR-LED-04 | Done |
+| 7.3 Implement capture ledger activity | ledger-tables.md | Done |
+| 7.4 Implement refund ledger activity | ledger-tables.md | Done |
+| 7.5 Implement pending balance updates for authorization | ledger-tables.md | Done |
+| 7.6 Implement pending balance updates for void | ledger-tables.md | Done |
+| 7.7 Implement clearing account balance monitoring | FR-LED-06 | Done |
+| 7.8 Add reconciliation query support | FR-LED-07 | Done |
 
-**Deliverables:**
-- Ledger activities in `workflow/activities/`
-- Balance calculation utilities
-- Clearing account monitoring queries
+**Implementation Summary:**
+
+Activities added to `workflow/ledger_activities.go`:
+- `PlaceAuthorizationHold` - Increases pending_balance on customer account (no ledger entry - authorization is a promise, not money movement)
+- `ReleaseAuthorizationHold` - Decreases pending_balance on customer account (for void or expiration)
+- `RecordCapture` - Creates balanced journal entry with debit to customer, credit to settlement clearing; updates account balances with optimistic locking
+- `RecordRefund` - Creates balanced journal entry with debit to merchant, credit to customer
+- `GetClearingAccountBalances` - Retrieves all clearing account balances for a currency
+- `MonitorClearingAccounts` - Identifies clearing accounts with non-zero balances exceeding thresholds (12h warning, 24h critical)
+- `GetAccountBalance` - Retrieves current balance state for an account
+
+Repository interfaces defined:
+- `AccountRepository` - For account balance operations with optimistic locking
+- `JournalEntryRepository` - For journal entry persistence and idempotency checks
+- `LedgerEntryRepository` - For append-only ledger entry creation
+
+Key design decisions:
+- Authorization places hold on pending_balance (no ledger entry until capture)
+- Capture creates journal entry: DEBIT customer, CREDIT settlement clearing
+- Refund creates journal entry: DEBIT merchant, CREDIT customer
+- Optimistic locking via version field prevents concurrent balance corruption
+- Idempotency via journal entry reference lookup prevents duplicate entries
+
+**Tests:**
+- `TestPlaceAuthorizationHold_Success` - Verifies hold placement and balance updates
+- `TestPlaceAuthorizationHold_InsufficientFunds` - Verifies insufficient funds handling
+- `TestReleaseAuthorizationHold_Success` - Verifies hold release
+- `TestRecordCapture_Success` - Verifies capture with journal/ledger entries
+- `TestRecordCapture_Idempotent` - Verifies duplicate capture handling
+- `TestRecordRefund_Success` - Verifies refund with balanced entries
+- `TestMonitorClearingAccounts_WithWarning` - Verifies 12h warning threshold
+- `TestMonitorClearingAccounts_WithCritical` - Verifies 24h critical threshold
+- `TestPlaceAuthorizationHold_OptimisticLockFailure` - Verifies concurrent update handling
 
 **Validation:**
-- All journal entries balance (debits = credits)
-- Concurrent balance updates handled correctly
+- All journal entries balance (debits = credits) - enforced by domain.JournalEntry.Validate()
+- Concurrent balance updates handled via optimistic locking with version field
+- Clearing account monitoring alerts on non-zero balances exceeding thresholds
 
 ---
 
