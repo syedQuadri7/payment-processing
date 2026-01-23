@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"go.temporal.io/sdk/activity"
 
@@ -48,18 +50,66 @@ func (a *Activities) WriteOutboxEvent(ctx context.Context, input WriteOutboxEven
 		"aggregate_id", input.AggregateID,
 	)
 
-	// TODO: Write to outbox table
+	if a.OutboxRepo == nil {
+		logger.Warn("Outbox repository not configured, skipping outbox write")
+		return nil
+	}
+
+	// Marshal payload to JSON
+	payloadBytes, err := json.Marshal(input.Payload)
+	if err != nil {
+		return fmt.Errorf("marshaling outbox payload: %w", err)
+	}
+
+	// Use idempotency key as event ID to prevent duplicates
+	event := &domain.OutboxEvent{
+		ID:            input.IdempotencyKey,
+		AggregateType: domain.AggregateType(input.AggregateType),
+		AggregateID:   input.AggregateID,
+		EventType:     domain.OutboxEventType(input.EventType),
+		Payload:       payloadBytes,
+	}
+
+	if err := a.OutboxRepo.Create(ctx, event); err != nil {
+		// Check for duplicate key error (idempotent)
+		if isDuplicateKeyError(err) {
+			logger.Info("Outbox event already exists (idempotent)",
+				"event_id", input.IdempotencyKey,
+			)
+			return nil
+		}
+		return fmt.Errorf("creating outbox event: %w", err)
+	}
+
+	logger.Info("Outbox event created",
+		"event_id", input.IdempotencyKey,
+	)
 	return nil
+}
+
+// isDuplicateKeyError checks if the error is a PostgreSQL duplicate key violation
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for PostgreSQL duplicate key error code (23505)
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "duplicate key") || strings.Contains(errMsg, "23505")
 }
 
 // WriteAuditLogInput contains data for audit log writes
 type WriteAuditLogInput struct {
-	EntityType string         `json:"entity_type"`
-	EntityID   string         `json:"entity_id"`
-	Action     string         `json:"action"`
-	Changes    map[string]any `json:"changes,omitempty"`
-	ActorID    *string        `json:"actor_id,omitempty"`
-	ActorType  string         `json:"actor_type"`
+	EntityType    string         `json:"entity_type"`
+	EntityID      string         `json:"entity_id"`
+	Action        string         `json:"action"`
+	OldValues     map[string]any `json:"old_values,omitempty"`
+	NewValues     map[string]any `json:"new_values,omitempty"`
+	ActorID       *string        `json:"actor_id,omitempty"`
+	ActorType     string         `json:"actor_type"`
+	CorrelationID string         `json:"correlation_id,omitempty"`
+	Provider      string         `json:"provider,omitempty"`
+	WorkflowID    string         `json:"workflow_id,omitempty"`
+	RequestID     string         `json:"request_id,omitempty"`
 }
 
 // WriteAuditLog writes an entry to the audit log
@@ -71,7 +121,77 @@ func (a *Activities) WriteAuditLog(ctx context.Context, input WriteAuditLogInput
 		"action", input.Action,
 	)
 
-	// TODO: Write to audit log table
+	if a.AuditLogRepo == nil {
+		logger.Warn("Audit log repository not configured, skipping audit write")
+		return nil
+	}
+
+	// Marshal old values
+	var oldValuesJSON json.RawMessage
+	if input.OldValues != nil {
+		bytes, err := json.Marshal(input.OldValues)
+		if err != nil {
+			return fmt.Errorf("marshaling old values: %w", err)
+		}
+		oldValuesJSON = bytes
+	}
+
+	// Marshal new values
+	var newValuesJSON json.RawMessage
+	if input.NewValues != nil {
+		bytes, err := json.Marshal(input.NewValues)
+		if err != nil {
+			return fmt.Errorf("marshaling new values: %w", err)
+		}
+		newValuesJSON = bytes
+	}
+
+	// Marshal metadata
+	metadata := domain.AuditMetadata{
+		CorrelationID: input.CorrelationID,
+		Provider:      input.Provider,
+		WorkflowID:    input.WorkflowID,
+		RequestID:     input.RequestID,
+	}
+	metadataBytes, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("marshaling metadata: %w", err)
+	}
+
+	// Generate unique ID for the audit entry
+	activityInfo := activity.GetInfo(ctx)
+	entryID := fmt.Sprintf("audit-%s-%s-%d",
+		input.EntityID,
+		input.Action,
+		activityInfo.Attempt,
+	)
+
+	entry := &domain.AuditLogEntry{
+		ID:         entryID,
+		EntityType: domain.AuditEntityType(input.EntityType),
+		EntityID:   input.EntityID,
+		Action:     domain.AuditAction(input.Action),
+		ActorType:  domain.AuditActorType(input.ActorType),
+		ActorID:    input.ActorID,
+		OldValues:  oldValuesJSON,
+		NewValues:  newValuesJSON,
+		Metadata:   metadataBytes,
+	}
+
+	if err := a.AuditLogRepo.Create(ctx, entry); err != nil {
+		// Check for duplicate key error (idempotent)
+		if isDuplicateKeyError(err) {
+			logger.Info("Audit log entry already exists (idempotent)",
+				"entry_id", entryID,
+			)
+			return nil
+		}
+		return fmt.Errorf("creating audit log entry: %w", err)
+	}
+
+	logger.Info("Audit log entry created",
+		"entry_id", entryID,
+	)
 	return nil
 }
 

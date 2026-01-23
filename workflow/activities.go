@@ -23,10 +23,24 @@ type PaymentAttemptRepository interface {
 	MarkCompleted(ctx context.Context, id string, status domain.AttemptStatus, providerCode, declineCode *string, declineType *domain.DeclineType) error
 }
 
+// OutboxRepository defines the interface for outbox event persistence
+type OutboxRepository interface {
+	Create(ctx context.Context, event *domain.OutboxEvent) error
+	GetUnpublished(ctx context.Context, limit int) ([]*domain.OutboxEvent, error)
+	MarkPublished(ctx context.Context, ids []string) error
+}
+
+// AuditLogRepository defines the interface for audit log persistence
+type AuditLogRepository interface {
+	Create(ctx context.Context, entry *domain.AuditLogEntry) error
+}
+
 // Activities holds the dependencies for workflow activities
 type Activities struct {
 	DeclineCodeRepo    DeclineCodeRepository
 	PaymentAttemptRepo PaymentAttemptRepository
+	OutboxRepo         OutboxRepository
+	AuditLogRepo       AuditLogRepository
 }
 
 // NewActivities creates a new Activities instance
@@ -35,10 +49,17 @@ func NewActivities() *Activities {
 }
 
 // NewActivitiesWithDependencies creates a new Activities instance with repository dependencies
-func NewActivitiesWithDependencies(declineCodeRepo DeclineCodeRepository, paymentAttemptRepo PaymentAttemptRepository) *Activities {
+func NewActivitiesWithDependencies(
+	declineCodeRepo DeclineCodeRepository,
+	paymentAttemptRepo PaymentAttemptRepository,
+	outboxRepo OutboxRepository,
+	auditLogRepo AuditLogRepository,
+) *Activities {
 	return &Activities{
 		DeclineCodeRepo:    declineCodeRepo,
 		PaymentAttemptRepo: paymentAttemptRepo,
+		OutboxRepo:         outboxRepo,
+		AuditLogRepo:       auditLogRepo,
 	}
 }
 
