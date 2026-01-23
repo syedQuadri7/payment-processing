@@ -101,5 +101,11 @@ func (db *DB) Repositories() *domain.Repositories {
 		AuthorizationHolds: NewAuthorizationHoldRepository(db.Pool),
 		PaymentAttempts:    NewPaymentAttemptRepository(db.Pool),
 		DeclineCodes:       NewDeclineCodeRepository(db.Pool),
+		Accounts:           NewAccountRepository(db.Pool),
+		JournalEntries:     NewJournalEntryRepository(db.Pool),
+		LedgerEntries:      NewLedgerEntryRepository(db.Pool),
+		Outbox:             NewOutboxRepository(db.Pool),
+		AuditLog:           NewAuditLogRepository(db.Pool),
+		ProcessedEvents:    NewProcessedEventRepository(db.Pool),
 	}
 }
