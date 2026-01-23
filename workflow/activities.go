@@ -11,18 +11,35 @@ import (
 	"payment-processing/internal/domain"
 )
 
+// DeclineCodeRepository defines the interface for decline code lookups
+type DeclineCodeRepository interface {
+	GetByProviderCode(ctx context.Context, provider domain.Provider, code string) (*domain.DeclineCodeMapping, error)
+}
+
+// PaymentAttemptRepository defines the interface for payment attempt persistence
+type PaymentAttemptRepository interface {
+	Create(ctx context.Context, pa *domain.PaymentAttempt) error
+	GetByID(ctx context.Context, id string) (*domain.PaymentAttempt, error)
+	MarkCompleted(ctx context.Context, id string, status domain.AttemptStatus, providerCode, declineCode *string, declineType *domain.DeclineType) error
+}
+
 // Activities holds the dependencies for workflow activities
 type Activities struct {
-	// Repositories would be injected here
-	// PaymentIntentRepo domain.PaymentIntentRepository
-	// PaymentAttemptRepo domain.PaymentAttemptRepository
-	// OutboxRepo domain.OutboxRepository
-	// AuditRepo domain.AuditLogRepository
+	DeclineCodeRepo    DeclineCodeRepository
+	PaymentAttemptRepo PaymentAttemptRepository
 }
 
 // NewActivities creates a new Activities instance
 func NewActivities() *Activities {
 	return &Activities{}
+}
+
+// NewActivitiesWithDependencies creates a new Activities instance with repository dependencies
+func NewActivitiesWithDependencies(declineCodeRepo DeclineCodeRepository, paymentAttemptRepo PaymentAttemptRepository) *Activities {
+	return &Activities{
+		DeclineCodeRepo:    declineCodeRepo,
+		PaymentAttemptRepo: paymentAttemptRepo,
+	}
 }
 
 // AuthorizePaymentInput contains data for authorization
