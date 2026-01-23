@@ -18,8 +18,8 @@ A phased implementation plan for the Payment Processing Service, referencing req
 | Phase 8 | **Complete** | API Layer |
 | Phase 9 | **Complete** | Event Publishing (Transactional Outbox) |
 | Phase 10 | **Complete** | Audit and Observability |
-| Phase 11 | **Next** | Project Restructure (Multi-Service) |
-| Phase 12 | Planned | Provider Simulator Service |
+| Phase 11 | **Complete** | Project Restructure (Multi-Service) |
+| Phase 12 | **Next** | Provider Simulator Service |
 | Phase 13 | Planned | Code Review and Hardening |
 | Phase 14 | Planned | Kubernetes/Helm Deployment (Optional) |
 
@@ -49,7 +49,7 @@ The core payment processing service is feature-complete (Phases 1-10). The codeb
 - Audit log query endpoints (by entity, actor, action, time range)
 - Prometheus-format metrics with per-provider tracking
 
-**Next:** Phase 11 restructures the project into a multi-service architecture with Docker-based development environment.
+**Next:** Phase 12 expands the provider simulator into a full-featured integration testing service.
 
 ---
 
@@ -542,7 +542,7 @@ Audit query endpoints in `server/handlers/audit.go`:
 
 ---
 
-### Phase 11: Project Restructure (Multi-Service)
+### Phase 11: Project Restructure (Multi-Service) **[COMPLETE]**
 
 Refactor project into a multi-service architecture for better team separation and deployment flexibility.
 
@@ -626,11 +626,29 @@ backend/payment-processing/
 - Updated documentation
 - Working local development environment via docker-compose
 
+**Implementation Summary:**
+
+Directory structure created:
+- `infrastructure/docker/` - Docker Compose configurations for dev and test
+- `services/payment-api/` - REST API service with Dockerfile and entry point
+- `services/payment-worker/` - Temporal worker service with Dockerfile and entry point
+- `services/provider-simulator/` - Moved from tools/webhook-simulator
+- `pkg/domain/` - Shared domain types (moved from internal/domain)
+- `pkg/logging/` - Shared logging utilities (moved from internal/logging)
+
+Key changes:
+- All imports updated from `payment-processing/internal/domain` to `payment-processing/pkg/domain`
+- All imports updated from `payment-processing/internal/logging` to `payment-processing/pkg/logging`
+- Makefile updated with service-specific build targets (`make build-api`, `make build-worker`)
+- Docker Compose supports dev (`make dev-up`) and test (`make test-up`) environments
+- Each service has its own Dockerfile and README
+- Root main.go preserved as combined entry point for backwards compatibility
+
 **Validation:**
-- Each service builds independently
-- All tests pass
-- Local docker-compose works from infrastructure/docker/
-- Clear separation of concerns
+- Each service builds independently: `make build-api`, `make build-worker`, `make build-simulator`
+- All tests pass: `go test ./...`
+- Docker Compose works from `infrastructure/docker/`
+- Clear separation: shared code in `pkg/`, services in `services/`, infrastructure in `infrastructure/`
 
 ---
 
