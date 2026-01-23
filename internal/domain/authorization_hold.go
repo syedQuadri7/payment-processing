@@ -19,6 +19,7 @@ type AuthorizationHold struct {
 	ExpiresAt       time.Time
 	CapturedAmount  decimal.Decimal
 	CapturedAt      *time.Time
+	VoidedAt        *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }

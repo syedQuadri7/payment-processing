@@ -14,6 +14,7 @@ type PaymentMethod struct {
 	LastFour    *string
 	ExpiryMonth *int
 	ExpiryYear  *int
+	CardBrand   *string // VISA, MASTERCARD, AMEX, etc.
 	IsDefault   bool
 	Status      PaymentMethodStatus
 	CreatedAt   time.Time

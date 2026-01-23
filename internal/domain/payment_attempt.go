@@ -16,6 +16,7 @@ type PaymentAttempt struct {
 	DeclineType          *DeclineType
 	ProcessorTxnID       *string
 	IdempotencyKey       string
+	ErrorMessage         *string
 	CreatedAt            time.Time
 	CompletedAt          *time.Time
 }
