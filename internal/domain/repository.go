@@ -54,6 +54,55 @@ type DeclineCodeRepository interface {
 	GetByProvider(ctx context.Context, provider Provider) ([]*DeclineCodeMapping, error)
 }
 
+// AccountRepository defines operations for ledger accounts
+type AccountRepository interface {
+	Create(ctx context.Context, account *Account) error
+	GetByID(ctx context.Context, id string) (*Account, error)
+	GetByOwnerID(ctx context.Context, ownerID string) ([]*Account, error)
+	GetByName(ctx context.Context, name string, currency string) (*Account, error)
+	GetClearingAccounts(ctx context.Context, currency string) ([]*Account, error)
+	UpdateBalances(ctx context.Context, id string, ledger, pending, available decimal.Decimal, expectedVersion int) error
+	UpdateStatus(ctx context.Context, id string, status AccountStatus) error
+}
+
+// JournalEntryRepository defines operations for journal entries
+type JournalEntryRepository interface {
+	Create(ctx context.Context, entry *JournalEntry) error
+	GetByID(ctx context.Context, id string) (*JournalEntry, error)
+	GetByReference(ctx context.Context, refType ReferenceType, refID string) ([]*JournalEntry, error)
+}
+
+// LedgerEntryRepository defines operations for ledger entries
+type LedgerEntryRepository interface {
+	Create(ctx context.Context, entry *LedgerEntry) error
+	GetByJournalEntryID(ctx context.Context, journalEntryID string) ([]*LedgerEntry, error)
+	GetByAccountID(ctx context.Context, accountID string, limit int) ([]*LedgerEntry, error)
+	GetRunningBalance(ctx context.Context, accountID string) (decimal.Decimal, error)
+}
+
+// OutboxRepository defines operations for the transactional outbox
+type OutboxRepository interface {
+	Create(ctx context.Context, event *OutboxEvent) error
+	GetUnpublished(ctx context.Context, limit int) ([]*OutboxEvent, error)
+	MarkPublished(ctx context.Context, ids []string) error
+	DeleteOlderThan(ctx context.Context, before time.Time) (int64, error)
+}
+
+// AuditLogRepository defines operations for the audit log
+type AuditLogRepository interface {
+	Create(ctx context.Context, entry *AuditLogEntry) error
+	GetByEntity(ctx context.Context, entityType AuditEntityType, entityID string) ([]*AuditLogEntry, error)
+	GetByActor(ctx context.Context, actorType AuditActorType, actorID string, limit int) ([]*AuditLogEntry, error)
+	GetByTimeRange(ctx context.Context, start, end time.Time, limit int) ([]*AuditLogEntry, error)
+}
+
+// ProcessedEventRepository defines operations for tracking processed webhook events
+type ProcessedEventRepository interface {
+	Create(ctx context.Context, event *ProcessedEvent) error
+	Exists(ctx context.Context, provider Provider, eventID string) (bool, error)
+	DeleteOlderThan(ctx context.Context, before time.Time) (int64, error)
+}
+
 // Repositories bundles all repository interfaces
 type Repositories struct {
 	PaymentIntents     PaymentIntentRepository
@@ -61,4 +110,10 @@ type Repositories struct {
 	AuthorizationHolds AuthorizationHoldRepository
 	PaymentAttempts    PaymentAttemptRepository
 	DeclineCodes       DeclineCodeRepository
+	Accounts           AccountRepository
+	JournalEntries     JournalEntryRepository
+	LedgerEntries      LedgerEntryRepository
+	Outbox             OutboxRepository
+	AuditLog           AuditLogRepository
+	ProcessedEvents    ProcessedEventRepository
 }
