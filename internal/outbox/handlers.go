@@ -6,7 +6,7 @@ import (
 	"log"
 	"sync"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // LoggingHandler is a simple handler that logs events

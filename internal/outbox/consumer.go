@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // EventHandler is called for each event polled from the outbox

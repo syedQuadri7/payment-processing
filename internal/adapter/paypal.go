@@ -13,7 +13,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 const (

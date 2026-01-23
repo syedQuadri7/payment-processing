@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // OutboxRepository implements domain.OutboxRepository

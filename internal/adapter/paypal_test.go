@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 func TestPayPalAdapter_Provider(t *testing.T) {

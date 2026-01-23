@@ -5,7 +5,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // PaymentWorkflowInput contains all data needed to start a payment workflow

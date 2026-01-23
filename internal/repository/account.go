@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // ErrOptimisticLock is returned when an optimistic lock conflict occurs

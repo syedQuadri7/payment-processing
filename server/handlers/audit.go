@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 	"payment-processing/server"
 	"payment-processing/server/middleware"
 )

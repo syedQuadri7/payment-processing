@@ -48,17 +48,43 @@ All documentation lives in `docs/`. Start with `docs/_reference.md` for navigati
 2. Follow existing patterns from finalized decisions
 3. Update `docs/_reference.md` if adding new documents
 
+## Project Structure
+
+```text
+payment-processing/
+├── docs/                           # Shared documentation
+├── infrastructure/                 # Infrastructure configuration
+│   └── docker/                    # Docker Compose files
+├── services/                       # Microservices
+│   ├── payment-api/               # REST API service
+│   ├── payment-worker/            # Temporal worker service
+│   └── provider-simulator/        # Test simulator service
+├── pkg/                           # Shared packages
+│   ├── domain/                    # Shared domain types
+│   └── logging/                   # Shared logging
+├── internal/                       # Internal packages
+│   ├── adapter/                   # Provider webhook adapters
+│   ├── outbox/                    # Outbox consumer
+│   └── repository/                # Database access layer
+├── server/                        # HTTP server (shared by API service)
+├── worker/                        # Temporal worker setup
+├── workflow/                      # Workflow definitions and activities
+└── main.go                        # Combined entry point (legacy)
+```
+
 ## Build and Run Commands
 
 ```bash
-# Build
-go build -o payment-processing .
+# Build all services
+make build
 
-# Run (requires Temporal server on localhost:7233)
-./payment-processing
+# Build individual services
+make build-api
+make build-worker
+make build-simulator
 
-# Run with custom settings
-TEMPORAL_HOST=localhost:7233 PORT=8080 ./payment-processing
+# Build combined binary (legacy)
+make build-combined
 
 # Run tests
 go test ./...
@@ -67,11 +93,37 @@ go test ./...
 go test -run TestName ./workflow/...
 ```
 
+## Docker Development
+
+```bash
+# Start development dependencies (postgres, temporal)
+make dev-up
+
+# Start all services including API and worker
+make dev-up-all
+
+# Stop development stack
+make dev-down
+
+# Start test environment with provider simulator
+make test-up
+
+# Stop test environment
+make test-down
+```
+
 ## Architecture
 
-The service runs two components in a single binary:
-- **HTTP API Server** (port 8080) - accepts payment requests, returns 202 with workflow ID
-- **Temporal Worker** - executes workflows and activities on the `payment-processing` task queue
+The service is split into two main components that can run separately or together:
+
+### Payment API Service (`services/payment-api/`)
+- REST API for payment operations (port 8080)
+- Webhook endpoints for Stripe, Adyen, PayPal
+- Outbox consumer for event publishing
+
+### Payment Worker Service (`services/payment-worker/`)
+- Temporal worker on `payment-processing` task queue
+- Executes workflows and activities
 
 See `docs/architecture/system-design.md` for full architecture diagrams.
 
@@ -79,14 +131,18 @@ See `docs/architecture/system-design.md` for full architecture diagrams.
 
 | Path | Purpose |
 |------|---------|
-| `main.go` | Entry point - starts API server and worker |
-| `server/` | HTTP handlers |
+| `main.go` | Combined entry point (runs both API and worker) |
+| `services/payment-api/` | REST API service |
+| `services/payment-worker/` | Temporal worker service |
+| `services/provider-simulator/` | Testing tool for simulating provider webhooks |
+| `server/` | HTTP handlers and middleware |
 | `worker/` | Temporal worker setup and registration |
 | `workflow/` | Workflow definitions and activities |
+| `pkg/domain/` | Shared domain types |
+| `pkg/logging/` | Shared structured logging |
 | `internal/adapter/` | Provider-specific webhook adapters |
 | `internal/repository/` | Database access layer |
-| `migrations/` | Database migrations |
-| `tools/webhook-simulator/` | Testing tool for simulating provider webhooks |
+| `infrastructure/docker/` | Docker Compose configurations |
 
 ## Key Architectural Patterns
 
@@ -143,17 +199,24 @@ Schema documentation is in `docs/schema/`. Key tables:
 |----------|---------|-------------|
 | `TEMPORAL_HOST` | `localhost:7233` | Temporal server address |
 | `PORT` | `8080` | HTTP server port |
-| `DATABASE_URL` | - | PostgreSQL connection string |
+| `DB_HOST` | `localhost` | PostgreSQL host |
+| `DB_USER` | - | PostgreSQL username |
+| `DB_PASSWORD` | - | PostgreSQL password |
+| `DB_NAME` | - | PostgreSQL database name |
 | `STRIPE_WEBHOOK_SECRET` | - | Stripe webhook signing secret |
 | `ADYEN_HMAC_KEY` | - | Adyen HMAC signing key |
 
 ## Testing
 
-Use the webhook simulator for integration testing:
+Use the provider simulator for integration testing:
 
 ```bash
-cd tools/webhook-simulator
-./webhook-simulator send stripe payment_intent.succeeded --amount 10000
+# Start test environment with simulator
+make test-up
+
+# Or use the simulator directly
+cd services/provider-simulator
+./provider-simulator send stripe payment_intent.succeeded --amount 10000
 ```
 
 See `docs/simulations/readme.md` for full testing documentation.

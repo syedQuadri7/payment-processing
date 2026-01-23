@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // mockOutboxRepo implements OutboxRepository for testing

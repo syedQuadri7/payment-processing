@@ -11,7 +11,7 @@ import (
 	"github.com/shopspring/decimal"
 	"go.temporal.io/sdk/client"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 	"payment-processing/server"
 	"payment-processing/server/middleware"
 	"payment-processing/workflow"

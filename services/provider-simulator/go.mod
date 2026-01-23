@@ -1,4 +1,4 @@
-module webhook-simulator
+module provider-simulator
 
 go 1.21
 

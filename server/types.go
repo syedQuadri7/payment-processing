@@ -5,7 +5,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // CreatePaymentIntentRequest represents a request to create a payment intent

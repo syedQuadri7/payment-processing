@@ -8,7 +8,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // generateAttemptID generates a unique attempt ID using workflow.SideEffect for determinism

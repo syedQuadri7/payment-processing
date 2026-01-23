@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // WebhookAdapter defines the interface for processing webhooks from payment providers

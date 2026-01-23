@@ -5,7 +5,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // PaymentState tracks the current state of a payment workflow

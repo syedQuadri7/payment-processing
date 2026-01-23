@@ -8,7 +8,7 @@ import (
 
 	"go.temporal.io/sdk/activity"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // PersistPaymentStateInput contains data for persistence

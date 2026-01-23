@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/testsuite"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // setupCommonActivityMocks sets up mocks for commonly used activities

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 func TestStripeAdapter_Provider(t *testing.T) {

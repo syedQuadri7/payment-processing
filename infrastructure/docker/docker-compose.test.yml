@@ -1,0 +1,87 @@
+version: '3.8'
+
+# Testing environment with provider simulator enabled
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.test.yml up
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: payment_test
+      POSTGRES_PASSWORD: payment_test_secret
+      POSTGRES_DB: payment_processing_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payment_test -d payment_processing_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.22
+    ports:
+      - "7234:7233"
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=payment_test
+      - POSTGRES_PWD=payment_test_secret
+      - POSTGRES_SEEDS=postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  payment-api:
+    build:
+      context: ../..
+      dockerfile: services/payment-api/Dockerfile
+    ports:
+      - "8081:8080"
+    environment:
+      - PORT=8080
+      - TEMPORAL_HOST=temporal:7233
+      - DB_HOST=postgres
+      - DB_USER=payment_test
+      - DB_PASSWORD=payment_test_secret
+      - DB_NAME=payment_processing_test
+      - DB_SSLMODE=disable
+      - OUTBOX_CONSUMER_ENABLED=true
+      # Point webhooks to the simulator
+      - STRIPE_API_URL=http://provider-simulator:9000/stripe
+      - ADYEN_API_URL=http://provider-simulator:9000/adyen
+      - PAYPAL_API_URL=http://provider-simulator:9000/paypal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+
+  payment-worker:
+    build:
+      context: ../..
+      dockerfile: services/payment-worker/Dockerfile
+    environment:
+      - TEMPORAL_HOST=temporal:7233
+      - DB_HOST=postgres
+      - DB_USER=payment_test
+      - DB_PASSWORD=payment_test_secret
+      - DB_NAME=payment_processing_test
+      - DB_SSLMODE=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+
+  provider-simulator:
+    build:
+      context: ../../services/provider-simulator
+      dockerfile: Dockerfile
+    ports:
+      - "9000:9000"
+    environment:
+      - PORT=9000
+      - WEBHOOK_TARGET_URL=http://payment-api:8080/webhooks

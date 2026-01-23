@@ -1,6 +1,6 @@
 package main
 
-import "webhook-simulator/cmd"
+import "provider-simulator/cmd"
 
 func main() {
 	cmd.Execute()

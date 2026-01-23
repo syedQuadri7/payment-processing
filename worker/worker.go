@@ -6,7 +6,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 	"payment-processing/workflow"
 )
 

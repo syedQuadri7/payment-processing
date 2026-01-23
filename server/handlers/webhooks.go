@@ -10,7 +10,7 @@ import (
 	"go.temporal.io/sdk/client"
 
 	"payment-processing/internal/adapter"
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 	"payment-processing/server"
 	"payment-processing/server/middleware"
 	"payment-processing/workflow"

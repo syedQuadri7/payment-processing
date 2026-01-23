@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"webhook-simulator/internal/client"
-	"webhook-simulator/internal/generator"
-	"webhook-simulator/internal/signer"
+	"provider-simulator/internal/client"
+	"provider-simulator/internal/generator"
+	"provider-simulator/internal/signer"
 )
 
 var (

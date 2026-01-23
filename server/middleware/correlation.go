@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"payment-processing/internal/logging"
+	"payment-processing/pkg/logging"
 )
 
 const (

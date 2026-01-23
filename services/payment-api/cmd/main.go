@@ -12,13 +12,12 @@ import (
 	"go.temporal.io/sdk/client"
 
 	"payment-processing/internal/adapter"
-	"payment-processing/pkg/domain"
 	"payment-processing/internal/outbox"
 	"payment-processing/internal/repository"
+	"payment-processing/pkg/domain"
 	"payment-processing/server"
 	"payment-processing/server/handlers"
 	"payment-processing/server/middleware"
-	"payment-processing/worker"
 )
 
 const version = "0.1.0"
@@ -39,7 +38,7 @@ func main() {
 	}
 	defer temporalClient.Close()
 
-	// Create database connection (optional - skip if not configured)
+	// Create database connection
 	var db *repository.DB
 	dbConfig := loadDBConfig()
 	if dbConfig != nil {
@@ -63,13 +62,6 @@ func main() {
 		repos = db.Repositories()
 	}
 
-	// Start worker in a goroutine with repository dependencies
-	go func() {
-		if err := worker.StartWorkerWithDependencies(temporalClient, repos); err != nil {
-			log.Fatalf("Worker failed: %v", err)
-		}
-	}()
-
 	// Start outbox consumer if database is available and enabled
 	var outboxConsumer *outbox.Consumer
 	if db != nil && getEnv("OUTBOX_CONSUMER_ENABLED", "true") == "true" {
@@ -90,7 +82,7 @@ func main() {
 	handler := buildRouter(temporalClient, db)
 
 	// Start HTTP server
-	log.Printf("Starting HTTP server on :%s", port)
+	log.Printf("Starting Payment API server on :%s", port)
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatalf("HTTP server failed: %v", err)
 	}
@@ -186,7 +178,7 @@ func buildRouter(temporalClient client.Client, db *repository.DB) *chi.Mux {
 				r.Get("/{id}/hold", intentHandler.GetHold)
 			})
 
-			// Audit log endpoints (FR-AUD-05)
+			// Audit log endpoints
 			auditHandler := handlers.NewAuditHandler(repos.AuditLog)
 			r.Route("/audit", func(r chi.Router) {
 				r.Get("/entity/{type}/{id}", auditHandler.GetByEntity)
@@ -207,14 +199,11 @@ func buildRouter(temporalClient client.Client, db *repository.DB) *chi.Mux {
 
 // loadDBConfig loads database configuration from environment
 func loadDBConfig() *repository.Config {
-	// Check if DATABASE_URL is set
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL != "" {
 		// Parse DATABASE_URL format would go here
-		// For now, use defaults
 	}
 
-	// Check if any DB config is provided
 	host := os.Getenv("DB_HOST")
 	if host == "" {
 		host = "localhost"
@@ -222,7 +211,6 @@ func loadDBConfig() *repository.Config {
 
 	user := os.Getenv("DB_USER")
 	if user == "" {
-		// No user configured, assume no database
 		return nil
 	}
 

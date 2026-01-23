@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"testing"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 func TestAdyenAdapter_Provider(t *testing.T) {

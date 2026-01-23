@@ -8,7 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 	"go.temporal.io/sdk/activity"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // DeclineCodeRepository defines the interface for decline code lookups

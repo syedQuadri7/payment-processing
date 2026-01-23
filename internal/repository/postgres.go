@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"payment-processing/internal/database"
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // Config holds database connection configuration

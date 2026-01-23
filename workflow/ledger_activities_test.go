@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"payment-processing/internal/domain"
+	"payment-processing/pkg/domain"
 )
 
 // MockAccountRepository is a mock implementation of AccountRepository
