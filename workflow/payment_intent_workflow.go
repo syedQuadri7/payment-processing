@@ -4,11 +4,21 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
 	"payment-processing/internal/domain"
 )
+
+// generateAttemptID generates a unique attempt ID using workflow.SideEffect for determinism
+func generateAttemptID(ctx workflow.Context) string {
+	var attemptID string
+	workflow.SideEffect(ctx, func(ctx workflow.Context) interface{} {
+		return uuid.New().String()
+	}).Get(&attemptID)
+	return attemptID
+}
 
 // PaymentIntentWorkflow orchestrates the full lifecycle of a payment intent
 // State machine: CREATED -> REQUIRES_AUTH -> AUTHORIZED -> CAPTURED/VOIDED
@@ -129,6 +139,10 @@ authLoop:
 		state.CurrentAttempt++
 		attemptStartTime := workflow.Now(ctx)
 
+		// Generate unique attempt ID (FR-DEC-06)
+		attemptID := generateAttemptID(ctx)
+		idempotencyKey := fmt.Sprintf("%s-auth-%d", input.IdempotencyKey, state.CurrentAttempt)
+
 		attempt := AttemptRecord{
 			AttemptNumber: state.CurrentAttempt,
 			Status:        domain.AttemptStatusProcessing,
@@ -138,8 +152,18 @@ authLoop:
 
 		logger.Info("Starting authorization attempt",
 			"attempt", state.CurrentAttempt,
+			"attempt_id", attemptID,
 			"payment_intent_id", input.PaymentIntentID,
 		)
+
+		// Create payment attempt record in database (FR-DEC-06)
+		_ = workflow.ExecuteActivity(dbCtx, activities.CreatePaymentAttempt, CreatePaymentAttemptInput{
+			ID:              attemptID,
+			PaymentIntentID: input.PaymentIntentID,
+			AttemptNumber:   state.CurrentAttempt,
+			Provider:        input.Provider,
+			IdempotencyKey:  idempotencyKey,
+		}).Get(ctx, nil)
 
 		// Execute authorization
 		var authResult AuthorizePaymentResult
@@ -150,7 +174,7 @@ authLoop:
 			Amount:          input.Amount,
 			Currency:        input.Currency,
 			PaymentMethodID: currentPaymentMethodID,
-			IdempotencyKey:  fmt.Sprintf("%s-auth-%d", input.IdempotencyKey, state.CurrentAttempt),
+			IdempotencyKey:  idempotencyKey,
 		}).Get(ctx, &authResult)
 
 		completedAt := workflow.Now(ctx)
@@ -161,6 +185,12 @@ authLoop:
 			state.Attempts[len(state.Attempts)-1].Status = domain.AttemptStatusFailed
 			errMsg := err.Error()
 			state.LastErrorMessage = &errMsg
+
+			// Complete the attempt record with failure status
+			_ = workflow.ExecuteActivity(dbCtx, activities.CompletePaymentAttempt, CompletePaymentAttemptInput{
+				AttemptID: attemptID,
+				Status:    domain.AttemptStatusFailed,
+			}).Get(ctx, nil)
 
 			// Check if this is a non-retryable error
 			var appErr *temporal.ApplicationError
@@ -185,6 +215,13 @@ authLoop:
 			state.AuthExpiresAt = authResult.ExpiresAt
 			state.UpdatedAt = workflow.Now(ctx)
 
+			// Complete the attempt record with success status
+			_ = workflow.ExecuteActivity(dbCtx, activities.CompletePaymentAttempt, CompletePaymentAttemptInput{
+				AttemptID:      attemptID,
+				Status:         domain.AttemptStatusSucceeded,
+				ProcessorTxnID: &authResult.ProviderPaymentID,
+			}).Get(ctx, nil)
+
 			logger.Info("Authorization succeeded",
 				"provider_payment_id", authResult.ProviderPaymentID,
 				"authorization_code", authResult.AuthorizationCode,
@@ -194,13 +231,65 @@ authLoop:
 
 		// Authorization failed with decline
 		state.Attempts[len(state.Attempts)-1].Status = domain.AttemptStatusFailed
-		state.Attempts[len(state.Attempts)-1].DeclineCode = authResult.DeclineCode
-		state.Attempts[len(state.Attempts)-1].DeclineType = authResult.DeclineType
-		state.Attempts[len(state.Attempts)-1].ErrorMessage = authResult.ErrorMessage
 
-		state.LastDeclineCode = authResult.DeclineCode
-		state.LastDeclineType = authResult.DeclineType
+		// Classify the decline code if present (FR-DEC-01)
+		var classifiedDeclineCode *domain.CanonicalDeclineCode
+		var classifiedDeclineType *domain.DeclineType
+		var providerResponseCode *string
+
+		if authResult.DeclineCode != nil {
+			providerResponseCode = authResult.DeclineCode
+
+			// Lookup decline code classification from database
+			var classifyResult ClassifyDeclineResult
+			classifyErr := workflow.ExecuteActivity(dbCtx, activities.ClassifyDecline, ClassifyDeclineInput{
+				Provider:     input.Provider,
+				ProviderCode: *authResult.DeclineCode,
+			}).Get(ctx, &classifyResult)
+
+			if classifyErr == nil {
+				if classifyResult.Found {
+					classifiedDeclineCode = &classifyResult.CanonicalCode
+				}
+				classifiedDeclineType = &classifyResult.DeclineType
+
+				logger.Info("Decline classified",
+					"provider_code", *authResult.DeclineCode,
+					"canonical_code", classifyResult.CanonicalCode,
+					"decline_type", classifyResult.DeclineType,
+					"retry_eligible", classifyResult.RetryEligible,
+				)
+			} else {
+				// Fall back to provider-supplied decline type
+				classifiedDeclineType = authResult.DeclineType
+			}
+		} else {
+			classifiedDeclineType = authResult.DeclineType
+		}
+
+		// Update attempt record with decline details
+		state.Attempts[len(state.Attempts)-1].DeclineType = classifiedDeclineType
+		state.Attempts[len(state.Attempts)-1].ErrorMessage = authResult.ErrorMessage
+		if classifiedDeclineCode != nil {
+			code := string(*classifiedDeclineCode)
+			state.Attempts[len(state.Attempts)-1].DeclineCode = &code
+		} else {
+			state.Attempts[len(state.Attempts)-1].DeclineCode = authResult.DeclineCode
+		}
+
+		// Update state with decline info
+		state.LastDeclineCode = state.Attempts[len(state.Attempts)-1].DeclineCode
+		state.LastDeclineType = classifiedDeclineType
 		state.LastErrorMessage = authResult.ErrorMessage
+
+		// Complete the attempt record with failure and decline details
+		_ = workflow.ExecuteActivity(dbCtx, activities.CompletePaymentAttempt, CompletePaymentAttemptInput{
+			AttemptID:            attemptID,
+			Status:               domain.AttemptStatusFailed,
+			ProviderResponseCode: providerResponseCode,
+			CanonicalDeclineCode: classifiedDeclineCode,
+			DeclineType:          classifiedDeclineType,
+		}).Get(ctx, nil)
 
 		// Check if we can retry
 		if state.CanRetry() {
@@ -219,9 +308,17 @@ authLoop:
 				"attempt", state.CurrentAttempt,
 			)
 
-			cancelled := waitWithSignals(ctx, retryDelay, webhookEventCh, cancelCh, state)
-			if cancelled || state.IsTerminal() {
+			waitResult := waitWithSignals(ctx, retryDelay, webhookEventCh, cancelCh, updatePaymentMethodCh, state)
+			if waitResult.cancelled || state.IsTerminal() {
 				break authLoop
+			}
+
+			// FR-DEC-09: If payment method was updated, use it for the next retry
+			if waitResult.paymentMethodUpdated {
+				currentPaymentMethodID = waitResult.newPaymentMethodID
+				logger.Info("Using updated payment method for retry",
+					"payment_method_id", currentPaymentMethodID,
+				)
 			}
 
 			// Continue to next attempt
@@ -287,11 +384,19 @@ func setupQueryHandlers(ctx workflow.Context, state *PaymentState) error {
 	return nil
 }
 
+// waitResult represents the outcome of waiting during recovery
+type waitResult struct {
+	cancelled            bool
+	paymentMethodUpdated bool
+	newPaymentMethodID   string
+}
+
 // waitWithSignals waits for a duration while remaining responsive to signals
-func waitWithSignals(ctx workflow.Context, duration time.Duration, webhookCh, cancelCh workflow.ReceiveChannel, state *PaymentState) bool {
+// Returns information about what signal was received, if any
+func waitWithSignals(ctx workflow.Context, duration time.Duration, webhookCh, cancelCh, updatePaymentMethodCh workflow.ReceiveChannel, state *PaymentState) waitResult {
 	timer := workflow.NewTimer(ctx, duration)
 	selector := workflow.NewSelector(ctx)
-	cancelled := false
+	result := waitResult{}
 
 	selector.AddFuture(timer, func(f workflow.Future) {
 		// Timer completed - continue with retry
@@ -308,11 +413,22 @@ func waitWithSignals(ctx workflow.Context, duration time.Duration, webhookCh, ca
 		c.Receive(ctx, &reason)
 		state.Status = domain.PaymentIntentStatusCancelled
 		state.UpdatedAt = workflow.Now(ctx)
-		cancelled = true
+		result.cancelled = true
+	})
+
+	// FR-DEC-09: Support immediate retry on payment method update
+	selector.AddReceive(updatePaymentMethodCh, func(c workflow.ReceiveChannel, _ bool) {
+		var paymentMethodID string
+		c.Receive(ctx, &paymentMethodID)
+		workflow.GetLogger(ctx).Info("Payment method updated during recovery, triggering immediate retry",
+			"payment_method_id", paymentMethodID,
+		)
+		result.paymentMethodUpdated = true
+		result.newPaymentMethodID = paymentMethodID
 	})
 
 	selector.Select(ctx)
-	return cancelled
+	return result
 }
 
 // handleWebhookEvent processes incoming webhook events
