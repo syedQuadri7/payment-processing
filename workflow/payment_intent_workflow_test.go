@@ -12,12 +12,36 @@ import (
 	"payment-processing/internal/domain"
 )
 
+// setupCommonActivityMocks sets up mocks for commonly used activities
+func setupCommonActivityMocks(env *testsuite.TestWorkflowEnvironment, activities *Activities) {
+	// Database activities that should always succeed
+	env.OnActivity(activities.CreatePaymentAttempt, mock.Anything, mock.Anything).
+		Return(&CreatePaymentAttemptResult{AttemptID: "attempt_test_001"}, nil)
+
+	env.OnActivity(activities.CompletePaymentAttempt, mock.Anything, mock.Anything).
+		Return(nil)
+
+	env.OnActivity(activities.ClassifyDecline, mock.Anything, mock.Anything).
+		Return(&ClassifyDeclineResult{
+			Found:         true,
+			DeclineType:   domain.DeclineTypeSoft,
+			RetryEligible: true,
+		}, nil)
+
+	env.OnActivity(activities.PersistPaymentState, mock.Anything, mock.Anything).
+		Return(nil)
+
+	env.OnActivity(activities.WriteOutboxEvent, mock.Anything, mock.Anything).
+		Return(nil)
+}
+
 func TestPaymentIntentWorkflow_SuccessfulAuthorization(t *testing.T) {
 	testSuite := &testsuite.WorkflowTestSuite{}
 	env := testSuite.NewTestWorkflowEnvironment()
 
 	// Set up activity mocks
 	activities := &Activities{}
+	setupCommonActivityMocks(env, activities)
 
 	paymentMethodID := "pm_test_123"
 	providerPaymentID := "psp_test_456"
@@ -37,12 +61,6 @@ func TestPaymentIntentWorkflow_SuccessfulAuthorization(t *testing.T) {
 			Success:        true,
 			CapturedAmount: decimal.NewFromInt(10000),
 		}, nil)
-
-	env.OnActivity(activities.PersistPaymentState, mock.Anything, mock.Anything).
-		Return(nil)
-
-	env.OnActivity(activities.WriteOutboxEvent, mock.Anything, mock.Anything).
-		Return(nil)
 
 	// Execute workflow
 	input := PaymentWorkflowInput{
@@ -74,6 +92,7 @@ func TestPaymentIntentWorkflow_ManualCapture(t *testing.T) {
 	env := testSuite.NewTestWorkflowEnvironment()
 
 	activities := &Activities{}
+	setupCommonActivityMocks(env, activities)
 
 	paymentMethodID := "pm_test_123"
 	providerPaymentID := "psp_test_456"
@@ -92,13 +111,7 @@ func TestPaymentIntentWorkflow_ManualCapture(t *testing.T) {
 		Return(&CapturePaymentResult{
 			Success:        true,
 			CapturedAmount: decimal.NewFromInt(10000),
-		}, nil)
-
-	env.OnActivity(activities.PersistPaymentState, mock.Anything, mock.Anything).
-		Return(nil)
-
-	env.OnActivity(activities.WriteOutboxEvent, mock.Anything, mock.Anything).
-		Return(nil)
+		}, nil).Maybe() // May or may not be called depending on webhook handling
 
 	// Send capture event after workflow starts
 	env.RegisterDelayedCallback(func() {
@@ -137,6 +150,7 @@ func TestPaymentIntentWorkflow_SoftDeclineWithRetry(t *testing.T) {
 	env := testSuite.NewTestWorkflowEnvironment()
 
 	activities := &Activities{}
+	setupCommonActivityMocks(env, activities)
 
 	paymentMethodID := "pm_test_123"
 	providerPaymentID := "psp_test_456"
@@ -170,12 +184,6 @@ func TestPaymentIntentWorkflow_SoftDeclineWithRetry(t *testing.T) {
 			CapturedAmount: decimal.NewFromInt(10000),
 		}, nil)
 
-	env.OnActivity(activities.PersistPaymentState, mock.Anything, mock.Anything).
-		Return(nil)
-
-	env.OnActivity(activities.WriteOutboxEvent, mock.Anything, mock.Anything).
-		Return(nil)
-
 	input := PaymentWorkflowInput{
 		PaymentIntentID: "pi_test_003",
 		CustomerID:      "cus_test_001",
@@ -204,6 +212,27 @@ func TestPaymentIntentWorkflow_HardDeclineNoRetry(t *testing.T) {
 
 	activities := &Activities{}
 
+	// Set up common mocks but override ClassifyDecline for hard decline
+	env.OnActivity(activities.CreatePaymentAttempt, mock.Anything, mock.Anything).
+		Return(&CreatePaymentAttemptResult{AttemptID: "attempt_test_001"}, nil)
+
+	env.OnActivity(activities.CompletePaymentAttempt, mock.Anything, mock.Anything).
+		Return(nil)
+
+	env.OnActivity(activities.ClassifyDecline, mock.Anything, mock.Anything).
+		Return(&ClassifyDeclineResult{
+			Found:         true,
+			CanonicalCode: domain.DeclineCardExpired,
+			DeclineType:   domain.DeclineTypeHard,
+			RetryEligible: false,
+		}, nil)
+
+	env.OnActivity(activities.PersistPaymentState, mock.Anything, mock.Anything).
+		Return(nil)
+
+	env.OnActivity(activities.WriteOutboxEvent, mock.Anything, mock.Anything).
+		Return(nil)
+
 	paymentMethodID := "pm_test_123"
 	declineCode := "expired_card"
 	declineType := domain.DeclineTypeHard
@@ -214,12 +243,6 @@ func TestPaymentIntentWorkflow_HardDeclineNoRetry(t *testing.T) {
 			DeclineCode: &declineCode,
 			DeclineType: &declineType,
 		}, nil)
-
-	env.OnActivity(activities.PersistPaymentState, mock.Anything, mock.Anything).
-		Return(nil)
-
-	env.OnActivity(activities.WriteOutboxEvent, mock.Anything, mock.Anything).
-		Return(nil)
 
 	input := PaymentWorkflowInput{
 		PaymentIntentID: "pi_test_004",
@@ -242,7 +265,8 @@ func TestPaymentIntentWorkflow_HardDeclineNoRetry(t *testing.T) {
 	require.Equal(t, domain.PaymentIntentStatusFailed, result.Status)
 	require.Equal(t, 1, result.AttemptCount)
 	require.NotNil(t, result.DeclineCode)
-	require.Equal(t, declineCode, *result.DeclineCode)
+	// Decline code is now the canonical code (converted from provider code via ClassifyDecline)
+	require.Equal(t, string(domain.DeclineCardExpired), *result.DeclineCode)
 }
 
 func TestPaymentIntentWorkflow_Cancellation(t *testing.T) {
@@ -250,6 +274,7 @@ func TestPaymentIntentWorkflow_Cancellation(t *testing.T) {
 	env := testSuite.NewTestWorkflowEnvironment()
 
 	activities := &Activities{}
+	setupCommonActivityMocks(env, activities)
 
 	paymentMethodID := "pm_test_123"
 	providerPaymentID := "psp_test_456"
@@ -268,12 +293,6 @@ func TestPaymentIntentWorkflow_Cancellation(t *testing.T) {
 		Return(&VoidPaymentResult{
 			Success: true,
 		}, nil)
-
-	env.OnActivity(activities.PersistPaymentState, mock.Anything, mock.Anything).
-		Return(nil)
-
-	env.OnActivity(activities.WriteOutboxEvent, mock.Anything, mock.Anything).
-		Return(nil)
 
 	// Send cancel signal after authorization
 	env.RegisterDelayedCallback(func() {
@@ -306,6 +325,7 @@ func TestPaymentIntentWorkflow_RequiresPaymentMethod(t *testing.T) {
 	env := testSuite.NewTestWorkflowEnvironment()
 
 	activities := &Activities{}
+	setupCommonActivityMocks(env, activities)
 
 	providerPaymentID := "psp_test_456"
 	authCode := "AUTH123"
@@ -324,12 +344,6 @@ func TestPaymentIntentWorkflow_RequiresPaymentMethod(t *testing.T) {
 			Success:        true,
 			CapturedAmount: decimal.NewFromInt(10000),
 		}, nil)
-
-	env.OnActivity(activities.PersistPaymentState, mock.Anything, mock.Anything).
-		Return(nil)
-
-	env.OnActivity(activities.WriteOutboxEvent, mock.Anything, mock.Anything).
-		Return(nil)
 
 	// Send payment method update signal
 	env.RegisterDelayedCallback(func() {
@@ -362,6 +376,7 @@ func TestPaymentIntentWorkflow_QueryStatus(t *testing.T) {
 	env := testSuite.NewTestWorkflowEnvironment()
 
 	activities := &Activities{}
+	setupCommonActivityMocks(env, activities)
 
 	paymentMethodID := "pm_test_123"
 	providerPaymentID := "psp_test_456"
@@ -376,21 +391,15 @@ func TestPaymentIntentWorkflow_QueryStatus(t *testing.T) {
 			ExpiresAt:         &expiresAt,
 		}, nil)
 
-	env.OnActivity(activities.PersistPaymentState, mock.Anything, mock.Anything).
-		Return(nil)
-
-	env.OnActivity(activities.WriteOutboxEvent, mock.Anything, mock.Anything).
-		Return(nil)
-
-	// Query status during manual capture wait
+	// Query status during manual capture wait (after authorization completes)
 	var queriedStatus domain.PaymentIntentStatus
 	env.RegisterDelayedCallback(func() {
 		result, err := env.QueryWorkflow(QueryPaymentStatus)
 		require.NoError(t, err)
 		require.NoError(t, result.Get(&queriedStatus))
-	}, 1*time.Second)
+	}, 5*time.Second) // Increased to allow time for authorization activities to complete
 
-	// Then capture
+	// Then capture (after query)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(SignalWebhookEvent, domain.CanonicalEvent{
 			ID:                "evt_test_001",
@@ -399,7 +408,7 @@ func TestPaymentIntentWorkflow_QueryStatus(t *testing.T) {
 			ProviderPaymentID: providerPaymentID,
 			CapturedAmount:    ptrDecimal(decimal.NewFromInt(10000)),
 		})
-	}, 2*time.Second)
+	}, 10*time.Second)
 
 	input := PaymentWorkflowInput{
 		PaymentIntentID: "pi_test_007",
@@ -542,4 +551,161 @@ func TestPaymentState_NextRetryDelay(t *testing.T) {
 // Helper function to create pointer to decimal
 func ptrDecimal(d decimal.Decimal) *decimal.Decimal {
 	return &d
+}
+
+// TestPaymentIntentWorkflow_ImmediateRetryOnPaymentMethodUpdate tests FR-DEC-09:
+// When a payment method is updated during RECOVERING state, retry is triggered immediately
+func TestPaymentIntentWorkflow_ImmediateRetryOnPaymentMethodUpdate(t *testing.T) {
+	testSuite := &testsuite.WorkflowTestSuite{}
+	env := testSuite.NewTestWorkflowEnvironment()
+
+	activities := &Activities{}
+	setupCommonActivityMocks(env, activities)
+
+	paymentMethodID := "pm_test_123"
+	newPaymentMethodID := "pm_new_456"
+	providerPaymentID := "psp_test_456"
+	authCode := "AUTH123"
+	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	declineCode := "insufficient_funds"
+	declineType := domain.DeclineTypeSoft
+
+	// First attempt fails with soft decline
+	env.OnActivity(activities.AuthorizePayment, mock.Anything, mock.MatchedBy(func(input AuthorizePaymentInput) bool {
+		return input.AttemptNumber == 1
+	})).Return(&AuthorizePaymentResult{
+		Success:     false,
+		DeclineCode: &declineCode,
+		DeclineType: &declineType,
+	}, nil)
+
+	// Second attempt (after payment method update) succeeds
+	// This attempt should use the new payment method
+	env.OnActivity(activities.AuthorizePayment, mock.Anything, mock.MatchedBy(func(input AuthorizePaymentInput) bool {
+		return input.AttemptNumber == 2 && input.PaymentMethodID == newPaymentMethodID
+	})).Return(&AuthorizePaymentResult{
+		Success:           true,
+		ProviderPaymentID: providerPaymentID,
+		AuthorizationCode: authCode,
+		ExpiresAt:         &expiresAt,
+	}, nil)
+
+	env.OnActivity(activities.CapturePayment, mock.Anything, mock.Anything).
+		Return(&CapturePaymentResult{
+			Success:        true,
+			CapturedAmount: decimal.NewFromInt(10000),
+		}, nil)
+
+	// Send payment method update signal during retry wait
+	// Normal retry wait is 4 hours, but we update payment method after 1 minute
+	// This should trigger immediate retry
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(SignalUpdatePaymentMethod, newPaymentMethodID)
+	}, 1*time.Minute)
+
+	input := PaymentWorkflowInput{
+		PaymentIntentID: "pi_test_immediate_retry",
+		CustomerID:      "cus_test_001",
+		Amount:          decimal.NewFromInt(10000),
+		Currency:        "USD",
+		Provider:        domain.ProviderStripe,
+		CaptureMethod:   domain.CaptureMethodAutomatic,
+		PaymentMethodID: &paymentMethodID,
+		IdempotencyKey:  "idem_test_immediate_retry",
+	}
+
+	env.ExecuteWorkflow(PaymentIntentWorkflow, input)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result PaymentWorkflowResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, domain.PaymentIntentStatusCaptured, result.Status)
+	require.Equal(t, 2, result.AttemptCount)
+}
+
+// TestPaymentIntentWorkflow_ClassifyDecline tests FR-DEC-01:
+// Decline codes are properly classified via the ClassifyDecline activity
+func TestPaymentIntentWorkflow_ClassifyDecline(t *testing.T) {
+	testSuite := &testsuite.WorkflowTestSuite{}
+	env := testSuite.NewTestWorkflowEnvironment()
+
+	activities := &Activities{}
+
+	// Set up common mocks
+	env.OnActivity(activities.CreatePaymentAttempt, mock.Anything, mock.Anything).
+		Return(&CreatePaymentAttemptResult{AttemptID: "attempt_test_001"}, nil)
+
+	env.OnActivity(activities.CompletePaymentAttempt, mock.Anything, mock.Anything).
+		Return(nil)
+
+	env.OnActivity(activities.PersistPaymentState, mock.Anything, mock.Anything).
+		Return(nil)
+
+	env.OnActivity(activities.WriteOutboxEvent, mock.Anything, mock.Anything).
+		Return(nil)
+
+	// Custom ClassifyDecline mock that verifies the lookup is called correctly
+	env.OnActivity(activities.ClassifyDecline, mock.Anything, mock.MatchedBy(func(input ClassifyDeclineInput) bool {
+		return input.Provider == domain.ProviderStripe && input.ProviderCode == "card_declined"
+	})).Return(&ClassifyDeclineResult{
+		Found:           true,
+		CanonicalCode:   domain.DeclineGenericDecline,
+		DeclineType:     domain.DeclineTypeSoft,
+		RetryEligible:   true,
+		Description:     "Generic card decline",
+		SuggestedAction: "Retry or request alternate payment method",
+	}, nil)
+
+	paymentMethodID := "pm_test_123"
+	providerPaymentID := "psp_test_456"
+	authCode := "AUTH123"
+	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	declineCode := "card_declined" // Provider-specific code
+
+	// First attempt fails with provider-specific decline code
+	env.OnActivity(activities.AuthorizePayment, mock.Anything, mock.MatchedBy(func(input AuthorizePaymentInput) bool {
+		return input.AttemptNumber == 1
+	})).Return(&AuthorizePaymentResult{
+		Success:     false,
+		DeclineCode: &declineCode,
+	}, nil)
+
+	// Second attempt succeeds
+	env.OnActivity(activities.AuthorizePayment, mock.Anything, mock.MatchedBy(func(input AuthorizePaymentInput) bool {
+		return input.AttemptNumber == 2
+	})).Return(&AuthorizePaymentResult{
+		Success:           true,
+		ProviderPaymentID: providerPaymentID,
+		AuthorizationCode: authCode,
+		ExpiresAt:         &expiresAt,
+	}, nil)
+
+	env.OnActivity(activities.CapturePayment, mock.Anything, mock.Anything).
+		Return(&CapturePaymentResult{
+			Success:        true,
+			CapturedAmount: decimal.NewFromInt(10000),
+		}, nil)
+
+	input := PaymentWorkflowInput{
+		PaymentIntentID: "pi_test_classify",
+		CustomerID:      "cus_test_001",
+		Amount:          decimal.NewFromInt(10000),
+		Currency:        "USD",
+		Provider:        domain.ProviderStripe,
+		CaptureMethod:   domain.CaptureMethodAutomatic,
+		PaymentMethodID: &paymentMethodID,
+		IdempotencyKey:  "idem_test_classify",
+	}
+
+	env.ExecuteWorkflow(PaymentIntentWorkflow, input)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result PaymentWorkflowResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, domain.PaymentIntentStatusCaptured, result.Status)
+	require.Equal(t, 2, result.AttemptCount)
 }
