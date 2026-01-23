@@ -648,12 +648,23 @@ Refactor project into a multi-service architecture for better team separation an
 
 **Proposed Structure:**
 
-```
+```text
 backend/payment-processing/
 ├── docs/                           # Shared documentation
 │   ├── architecture/              # System-wide architecture
 │   ├── decisions/                 # Cross-cutting decisions
 │   └── api/                       # API standards
+│
+├── infrastructure/                 # Infrastructure configuration
+│   ├── docker/                    # Docker configurations
+│   │   ├── docker-compose.yml     # Local development
+│   │   ├── docker-compose.test.yml # Testing environment
+│   │   └── docker-compose.prod.yml # Production reference
+│   ├── kubernetes/                # Kubernetes manifests
+│   │   ├── base/                  # Base configurations
+│   │   └── overlays/              # Environment-specific overlays
+│   ├── terraform/                 # Infrastructure as code (optional)
+│   └── scripts/                   # Deployment and ops scripts
 │
 ├── services/
 │   ├── payment-api/               # REST API service
@@ -683,7 +694,6 @@ backend/payment-processing/
 │   └── telemetry/                 # Shared observability
 │
 ├── migrations/                    # Database migrations
-├── docker-compose.yml             # Local development
 └── Makefile                       # Build commands
 ```
 
@@ -692,20 +702,24 @@ backend/payment-processing/
 | Task | Description | Priority |
 |------|-------------|----------|
 | 13.1 Design service boundaries | Define what goes in each service | Must Have |
-| 13.2 Create services/ directory structure | Set up new layout | Must Have |
-| 13.3 Extract payment-api service | Move API handlers, middleware | Must Have |
-| 13.4 Extract payment-worker service | Move workflow, activities | Must Have |
-| 13.5 Move simulator to provider-simulator service | From tools/ to services/ | Must Have |
-| 13.6 Create pkg/ for shared code | Domain, logging, telemetry | Must Have |
-| 13.7 Update imports across services | Fix package references | Must Have |
-| 13.8 Create per-service Dockerfiles | Independent builds | Should Have |
-| 13.9 Update docker-compose for multi-service | Local dev environment | Should Have |
-| 13.10 Create per-service documentation | Service-specific READMEs | Should Have |
-| 13.11 Update CI/CD for multi-service | Per-service builds and deploys | Should Have |
-| 13.12 Verify all tests pass | Ensure nothing broken | Must Have |
+| 13.2 Create infrastructure/ directory | Docker, K8s, scripts structure | Must Have |
+| 13.3 Create services/ directory structure | Set up new layout | Must Have |
+| 13.4 Extract payment-api service | Move API handlers, middleware | Must Have |
+| 13.5 Extract payment-worker service | Move workflow, activities | Must Have |
+| 13.6 Move simulator to provider-simulator service | From tools/ to services/ | Must Have |
+| 13.7 Create pkg/ for shared code | Domain, logging, telemetry | Must Have |
+| 13.8 Update imports across services | Fix package references | Must Have |
+| 13.9 Create per-service Dockerfiles | Independent builds | Must Have |
+| 13.10 Move docker-compose to infrastructure/ | Organize Docker configs | Must Have |
+| 13.11 Create docker-compose.test.yml | Testing environment config | Should Have |
+| 13.12 Create Kubernetes base manifests | Deployments, services, configmaps | Should Have |
+| 13.13 Create per-service documentation | Service-specific READMEs | Should Have |
+| 13.14 Update CI/CD for multi-service | Per-service builds and deploys | Should Have |
+| 13.15 Verify all tests pass | Ensure nothing broken | Must Have |
 
 **Deliverables:**
 - Multi-service project structure
+- Infrastructure folder with Docker and K8s configs
 - Independent service builds
 - Updated documentation
 - Working local development environment
@@ -713,7 +727,7 @@ backend/payment-processing/
 **Validation:**
 - Each service builds independently
 - All tests pass
-- Local docker-compose works
+- Local docker-compose works from infrastructure/docker/
 - Clear separation of concerns
 
 ---
