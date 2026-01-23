@@ -94,6 +94,7 @@ type AuditLogRepository interface {
 	GetByEntity(ctx context.Context, entityType AuditEntityType, entityID string) ([]*AuditLogEntry, error)
 	GetByActor(ctx context.Context, actorType AuditActorType, actorID string, limit int) ([]*AuditLogEntry, error)
 	GetByTimeRange(ctx context.Context, start, end time.Time, limit int) ([]*AuditLogEntry, error)
+	GetByAction(ctx context.Context, action AuditAction, limit int) ([]*AuditLogEntry, error)
 }
 
 // ProcessedEventRepository defines operations for tracking processed webhook events
