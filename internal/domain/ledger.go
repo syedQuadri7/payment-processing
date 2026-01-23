@@ -86,3 +86,177 @@ func (je *JournalEntry) TotalCredits() decimal.Decimal {
 	}
 	return total
 }
+
+// Imbalance returns the difference between debits and credits
+// Returns zero if balanced, positive if more debits, negative if more credits
+func (je *JournalEntry) Imbalance() decimal.Decimal {
+	return je.TotalDebits().Sub(je.TotalCredits())
+}
+
+// Validate checks if the journal entry is valid
+func (je *JournalEntry) Validate() error {
+	if je.Description == "" {
+		return ErrMissingDescription
+	}
+	if len(je.Entries) == 0 {
+		return ErrNoEntries
+	}
+	if len(je.Entries) < 2 {
+		return ErrMinimumTwoEntries
+	}
+	if !je.IsBalanced() {
+		return &UnbalancedJournalError{
+			Debits:  je.TotalDebits(),
+			Credits: je.TotalCredits(),
+		}
+	}
+	// Validate each entry
+	for i, entry := range je.Entries {
+		if entry.Amount.LessThanOrEqual(decimal.Zero) {
+			return &InvalidEntryError{Index: i, Message: "amount must be positive"}
+		}
+		if entry.AccountID == "" {
+			return &InvalidEntryError{Index: i, Message: "account_id is required"}
+		}
+		if entry.Direction != EntryDirectionDebit && entry.Direction != EntryDirectionCredit {
+			return &InvalidEntryError{Index: i, Message: "direction must be DEBIT or CREDIT"}
+		}
+	}
+	return nil
+}
+
+// AddDebit adds a debit entry to the journal
+func (je *JournalEntry) AddDebit(accountID string, amount decimal.Decimal) {
+	je.Entries = append(je.Entries, LedgerEntry{
+		AccountID: accountID,
+		Amount:    amount,
+		Direction: EntryDirectionDebit,
+		CreatedAt: time.Now(),
+	})
+}
+
+// AddCredit adds a credit entry to the journal
+func (je *JournalEntry) AddCredit(accountID string, amount decimal.Decimal) {
+	je.Entries = append(je.Entries, LedgerEntry{
+		AccountID: accountID,
+		Amount:    amount,
+		Direction: EntryDirectionCredit,
+		CreatedAt: time.Now(),
+	})
+}
+
+// JournalEntryBuilder helps construct valid journal entries
+type JournalEntryBuilder struct {
+	entry JournalEntry
+}
+
+// NewJournalEntry creates a new journal entry builder
+func NewJournalEntry(description string) *JournalEntryBuilder {
+	return &JournalEntryBuilder{
+		entry: JournalEntry{
+			Description: description,
+			PostedAt:    time.Now(),
+			CreatedAt:   time.Now(),
+			Entries:     make([]LedgerEntry, 0),
+		},
+	}
+}
+
+// WithReference sets the reference type and ID
+func (b *JournalEntryBuilder) WithReference(refType ReferenceType, refID string) *JournalEntryBuilder {
+	b.entry.ReferenceType = &refType
+	b.entry.ReferenceID = &refID
+	return b
+}
+
+// Debit adds a debit entry
+func (b *JournalEntryBuilder) Debit(accountID string, amount decimal.Decimal) *JournalEntryBuilder {
+	b.entry.AddDebit(accountID, amount)
+	return b
+}
+
+// Credit adds a credit entry
+func (b *JournalEntryBuilder) Credit(accountID string, amount decimal.Decimal) *JournalEntryBuilder {
+	b.entry.AddCredit(accountID, amount)
+	return b
+}
+
+// Build validates and returns the journal entry
+func (b *JournalEntryBuilder) Build() (*JournalEntry, error) {
+	if err := b.entry.Validate(); err != nil {
+		return nil, err
+	}
+	return &b.entry, nil
+}
+
+// MustBuild validates and returns the journal entry, panicking on error
+func (b *JournalEntryBuilder) MustBuild() *JournalEntry {
+	entry, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return entry
+}
+
+// NewCaptureJournalEntry creates a journal entry for a payment capture
+func NewCaptureJournalEntry(paymentIntentID, customerAccountID, clearingAccountID string, amount decimal.Decimal) (*JournalEntry, error) {
+	return NewJournalEntry("Capture payment "+paymentIntentID).
+		WithReference(ReferenceTypePaymentIntent, paymentIntentID).
+		Debit(customerAccountID, amount).
+		Credit(clearingAccountID, amount).
+		Build()
+}
+
+// NewRefundJournalEntry creates a journal entry for a refund
+func NewRefundJournalEntry(paymentIntentID, merchantAccountID, customerAccountID string, amount decimal.Decimal) (*JournalEntry, error) {
+	return NewJournalEntry("Refund for "+paymentIntentID).
+		WithReference(ReferenceTypeRefund, paymentIntentID).
+		Debit(merchantAccountID, amount).
+		Credit(customerAccountID, amount).
+		Build()
+}
+
+// NewSettlementJournalEntry creates a journal entry for settlement
+func NewSettlementJournalEntry(batchID, clearingAccountID, merchantAccountID string, amount decimal.Decimal) (*JournalEntry, error) {
+	return NewJournalEntry("Settlement batch "+batchID).
+		WithReference(ReferenceTypeSettlement, batchID).
+		Debit(clearingAccountID, amount).
+		Credit(merchantAccountID, amount).
+		Build()
+}
+
+// Ledger errors
+var (
+	ErrMissingDescription = &LedgerError{Message: "description is required"}
+	ErrNoEntries          = &LedgerError{Message: "journal entry must have at least one entry"}
+	ErrMinimumTwoEntries  = &LedgerError{Message: "journal entry must have at least two entries for double-entry"}
+)
+
+// LedgerError represents a general ledger error
+type LedgerError struct {
+	Message string
+}
+
+func (e *LedgerError) Error() string {
+	return e.Message
+}
+
+// UnbalancedJournalError indicates a journal entry that doesn't balance
+type UnbalancedJournalError struct {
+	Debits  decimal.Decimal
+	Credits decimal.Decimal
+}
+
+func (e *UnbalancedJournalError) Error() string {
+	return "journal entry is not balanced: debits=" + e.Debits.String() + " credits=" + e.Credits.String()
+}
+
+// InvalidEntryError indicates an invalid ledger entry
+type InvalidEntryError struct {
+	Index   int
+	Message string
+}
+
+func (e *InvalidEntryError) Error() string {
+	return "invalid entry at index " + string(rune('0'+e.Index)) + ": " + e.Message
+}
