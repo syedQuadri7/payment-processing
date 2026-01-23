@@ -2,6 +2,8 @@ package domain
 
 import (
 	"testing"
+
+	"github.com/shopspring/decimal"
 )
 
 func TestPaymentIntent_CanTransitionTo(t *testing.T) {
@@ -74,6 +76,202 @@ func TestPaymentIntent_IsTerminal(t *testing.T) {
 			pi := &PaymentIntent{Status: tt.status}
 			if got := pi.IsTerminal(); got != tt.isTerminal {
 				t.Errorf("IsTerminal() = %v, want %v", got, tt.isTerminal)
+			}
+		})
+	}
+}
+
+func TestPaymentIntent_CanAttachPaymentMethod(t *testing.T) {
+	tests := []struct {
+		status   PaymentIntentStatus
+		expected bool
+	}{
+		{PaymentIntentStatusCreated, true},
+		{PaymentIntentStatusRequiresMethod, true},
+		{PaymentIntentStatusRequiresAuth, false},
+		{PaymentIntentStatusAuthorized, false},
+		{PaymentIntentStatusCaptured, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			pi := &PaymentIntent{Status: tt.status}
+			if got := pi.CanAttachPaymentMethod(); got != tt.expected {
+				t.Errorf("CanAttachPaymentMethod() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPaymentIntent_CanAuthorize(t *testing.T) {
+	methodID := "pm-123"
+
+	tests := []struct {
+		name            string
+		status          PaymentIntentStatus
+		paymentMethodID *string
+		expected        bool
+	}{
+		{"created with method", PaymentIntentStatusCreated, &methodID, true},
+		{"requires_auth with method", PaymentIntentStatusRequiresAuth, &methodID, true},
+		{"created without method", PaymentIntentStatusCreated, nil, false},
+		{"authorized cannot authorize again", PaymentIntentStatusAuthorized, &methodID, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pi := &PaymentIntent{Status: tt.status, PaymentMethodID: tt.paymentMethodID}
+			if got := pi.CanAuthorize(); got != tt.expected {
+				t.Errorf("CanAuthorize() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPaymentIntent_CanCapture(t *testing.T) {
+	tests := []struct {
+		status   PaymentIntentStatus
+		expected bool
+	}{
+		{PaymentIntentStatusAuthorized, true},
+		{PaymentIntentStatusCreated, false},
+		{PaymentIntentStatusCaptured, false},
+		{PaymentIntentStatusVoided, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			pi := &PaymentIntent{Status: tt.status}
+			if got := pi.CanCapture(); got != tt.expected {
+				t.Errorf("CanCapture() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPaymentIntent_CanCancel(t *testing.T) {
+	tests := []struct {
+		status   PaymentIntentStatus
+		expected bool
+	}{
+		{PaymentIntentStatusCreated, true},
+		{PaymentIntentStatusRequiresMethod, true},
+		{PaymentIntentStatusRequiresAuth, true},
+		{PaymentIntentStatusAuthorized, true},
+		{PaymentIntentStatusCaptured, false},
+		{PaymentIntentStatusFailed, false},
+		{PaymentIntentStatusCancelled, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			pi := &PaymentIntent{Status: tt.status}
+			if got := pi.CanCancel(); got != tt.expected {
+				t.Errorf("CanCancel() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPaymentIntent_Validate(t *testing.T) {
+	tests := []struct {
+		name        string
+		intent      PaymentIntent
+		expectError bool
+	}{
+		{
+			name: "valid intent",
+			intent: PaymentIntent{
+				Amount:         decimal.NewFromInt(100),
+				Currency:       "USD",
+				CustomerID:     "cust-123",
+				IdempotencyKey: "key-123",
+			},
+			expectError: false,
+		},
+		{
+			name: "zero amount",
+			intent: PaymentIntent{
+				Amount:         decimal.Zero,
+				Currency:       "USD",
+				CustomerID:     "cust-123",
+				IdempotencyKey: "key-123",
+			},
+			expectError: true,
+		},
+		{
+			name: "negative amount",
+			intent: PaymentIntent{
+				Amount:         decimal.NewFromInt(-100),
+				Currency:       "USD",
+				CustomerID:     "cust-123",
+				IdempotencyKey: "key-123",
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid currency",
+			intent: PaymentIntent{
+				Amount:         decimal.NewFromInt(100),
+				Currency:       "US", // Should be 3 letters
+				CustomerID:     "cust-123",
+				IdempotencyKey: "key-123",
+			},
+			expectError: true,
+		},
+		{
+			name: "missing customer",
+			intent: PaymentIntent{
+				Amount:         decimal.NewFromInt(100),
+				Currency:       "USD",
+				CustomerID:     "",
+				IdempotencyKey: "key-123",
+			},
+			expectError: true,
+		},
+		{
+			name: "missing idempotency key",
+			intent: PaymentIntent{
+				Amount:         decimal.NewFromInt(100),
+				Currency:       "USD",
+				CustomerID:     "cust-123",
+				IdempotencyKey: "",
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.intent.Validate()
+			if (err != nil) != tt.expectError {
+				t.Errorf("Validate() error = %v, expectError %v", err, tt.expectError)
+			}
+		})
+	}
+}
+
+func TestPaymentIntent_TransitionTo(t *testing.T) {
+	tests := []struct {
+		name        string
+		from        PaymentIntentStatus
+		to          PaymentIntentStatus
+		expectError bool
+	}{
+		{"valid transition", PaymentIntentStatusCreated, PaymentIntentStatusRequiresAuth, false},
+		{"invalid transition", PaymentIntentStatusCreated, PaymentIntentStatusCaptured, true},
+		{"terminal cannot transition", PaymentIntentStatusCaptured, PaymentIntentStatusVoided, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pi := &PaymentIntent{Status: tt.from}
+			err := pi.TransitionTo(tt.to)
+			if (err != nil) != tt.expectError {
+				t.Errorf("TransitionTo() error = %v, expectError %v", err, tt.expectError)
+			}
+			if err == nil && pi.Status != tt.to {
+				t.Errorf("TransitionTo() status = %v, want %v", pi.Status, tt.to)
 			}
 		})
 	}
