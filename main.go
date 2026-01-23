@@ -12,6 +12,8 @@ import (
 	"go.temporal.io/sdk/client"
 
 	"payment-processing/internal/adapter"
+	"payment-processing/internal/domain"
+	"payment-processing/internal/outbox"
 	"payment-processing/internal/repository"
 	"payment-processing/server"
 	"payment-processing/server/handlers"
@@ -55,12 +57,34 @@ func main() {
 		}
 	}
 
-	// Start worker in a goroutine
+	// Get repositories if database is available
+	var repos *domain.Repositories
+	if db != nil {
+		repos = db.Repositories()
+	}
+
+	// Start worker in a goroutine with repository dependencies
 	go func() {
-		if err := worker.StartWorker(temporalClient); err != nil {
+		if err := worker.StartWorkerWithDependencies(temporalClient, repos); err != nil {
 			log.Fatalf("Worker failed: %v", err)
 		}
 	}()
+
+	// Start outbox consumer if database is available and enabled
+	var outboxConsumer *outbox.Consumer
+	if db != nil && getEnv("OUTBOX_CONSUMER_ENABLED", "true") == "true" {
+		consumerConfig := outbox.DefaultConsumerConfig()
+		outboxConsumer = outbox.NewConsumer(
+			repos.Outbox,
+			outbox.LoggingHandler(),
+			consumerConfig,
+		)
+		if err := outboxConsumer.Start(ctx); err != nil {
+			log.Printf("Warning: Failed to start outbox consumer: %v", err)
+		} else {
+			defer outboxConsumer.Stop()
+		}
+	}
 
 	// Build HTTP handler
 	handler := buildRouter(temporalClient, db)
@@ -80,6 +104,7 @@ func buildRouter(temporalClient client.Client, db *repository.DB) *chi.Mux {
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(middleware.CorrelationID)
 
 	// Create middleware stores
 	idempotencyStore := middleware.NewIdempotencyStore(nil)
@@ -159,6 +184,15 @@ func buildRouter(temporalClient client.Client, db *repository.DB) *chi.Mux {
 				r.Post("/{id}/cancel", intentHandler.Cancel)
 				r.Get("/{id}/attempts", intentHandler.GetAttempts)
 				r.Get("/{id}/hold", intentHandler.GetHold)
+			})
+
+			// Audit log endpoints (FR-AUD-05)
+			auditHandler := handlers.NewAuditHandler(repos.AuditLog)
+			r.Route("/audit", func(r chi.Router) {
+				r.Get("/entity/{type}/{id}", auditHandler.GetByEntity)
+				r.Get("/actor/{type}/{id}", auditHandler.GetByActor)
+				r.Get("/action/{action}", auditHandler.GetByAction)
+				r.Get("/range", auditHandler.GetByTimeRange)
 			})
 		}
 	})
