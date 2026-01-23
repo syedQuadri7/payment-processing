@@ -51,7 +51,7 @@ func (s *Server) HandlePayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	paymentID := uuid.New().String()
-	input := workflow.PaymentInput{
+	input := workflow.LegacyPaymentInput{
 		ID:     paymentID,
 		Amount: req.Amount,
 		From:   req.From,
