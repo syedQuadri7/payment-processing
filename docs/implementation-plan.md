@@ -18,12 +18,16 @@ A phased implementation plan for the Payment Processing Service, referencing req
 | Phase 8 | **Complete** | API Layer |
 | Phase 9 | **Complete** | Event Publishing (Transactional Outbox) |
 | Phase 10 | **Complete** | Audit and Observability |
+| Phase 11 | **Next** | Provider Simulator Service |
+| Phase 12 | Planned | Code Review and Hardening |
+| Phase 13 | Planned | Project Restructure (Multi-Service) |
 
 ---
 
 ## Current State
 
-The codebase now includes:
+The core payment processing service is feature-complete (Phases 1-10). The codebase includes:
+
 - Complete database schema with 14 migrations (all core tables, ledger, outbox, audit)
 - Full domain model with state machines and canonical types
 - Repository implementations with PostgreSQL
@@ -44,7 +48,7 @@ The codebase now includes:
 - Audit log query endpoints (by entity, actor, action, time range)
 - Prometheus-format metrics with per-provider tracking
 
-**All phases complete.** The payment processing service is feature-complete for the learning project scope.
+**Next:** Phase 11 expands the simulator into a full-featured provider simulation service for integration and e2e testing.
 
 ---
 
@@ -534,6 +538,183 @@ Audit query endpoints in `server/handlers/audit.go`:
 - All payment state changes can be logged via WriteAuditLog activity
 - Metrics endpoint returns valid Prometheus format
 - Correlation IDs propagate through request lifecycle
+
+---
+
+### Phase 11: Provider Simulator Service
+
+Expands the webhook simulator into a comprehensive provider simulation service for integration and e2e testing.
+
+**Goals:**
+- Enable full payment flow testing without real provider accounts
+- Simulate various provider behaviors (success, decline, timeout, webhook delays)
+- Support automated integration and e2e test suites
+- Provide realistic provider API responses
+
+**Tasks:**
+
+| Task | Description | Priority |
+|------|-------------|----------|
+| 11.1 Design simulator service architecture | Separate service with its own API | Must Have |
+| 11.2 Implement Stripe provider simulator | Full Stripe API simulation (auth, capture, refund, webhooks) | Must Have |
+| 11.3 Implement Adyen provider simulator | Full Adyen API simulation with notification webhooks | Must Have |
+| 11.4 Implement PayPal provider simulator | Full PayPal API simulation with IPN/webhooks | Must Have |
+| 11.5 Add configurable response scenarios | Success, decline codes, timeouts, delays | Must Have |
+| 11.6 Add webhook delivery simulation | Configurable delays, retries, signature generation | Must Have |
+| 11.7 Add test scenario presets | Common test cases (happy path, insufficient funds, expired card) | Should Have |
+| 11.8 Add state persistence for test flows | Track simulated payment state across requests | Should Have |
+| 11.9 Add test data generation | Generate valid test card numbers, tokens | Should Have |
+| 11.10 Create integration test suite | Full e2e tests using simulator | Must Have |
+| 11.11 Add simulator admin API | Configure behavior, view state, reset | Should Have |
+| 11.12 Document simulator usage | API docs, test scenarios, examples | Must Have |
+
+**Deliverables:**
+- Standalone simulator service in `services/provider-simulator/`
+- Full provider API simulation for Stripe, Adyen, PayPal
+- Integration test suite
+- Simulator documentation
+
+**Validation:**
+- Full payment lifecycle can be tested without real provider accounts
+- All decline scenarios can be simulated
+- Integration tests pass reliably
+
+---
+
+### Phase 12: Code Review and Hardening
+
+Comprehensive code review covering security, best practices, usability, and maintainability.
+
+**Goals:**
+- Identify and fix security vulnerabilities
+- Ensure consistent coding patterns and best practices
+- Improve code maintainability and documentation
+- Verify error handling and edge cases
+- Shift-left validation: fail fast with clear errors at API/workflow entry points
+
+**Tasks:**
+
+| Task | Description | Priority |
+|------|-------------|----------|
+| 12.1 Security review - Authentication | Review API key handling, storage, validation | Must Have |
+| 12.2 Security review - Input validation | Review all user inputs for injection risks | Must Have |
+| 12.3 Security review - Sensitive data | Review logging, error messages for data leakage | Must Have |
+| 12.4 Security review - Dependencies | Audit dependencies for vulnerabilities | Must Have |
+| 12.5 Best practices - Error handling | Consistent error types, messages, logging | Must Have |
+| 12.6 Best practices - Concurrency | Review goroutines, locks, race conditions | Must Have |
+| 12.7 Best practices - Resource cleanup | Review defer usage, connection handling | Must Have |
+| 12.8 Best practices - Testing | Review test coverage, edge cases, mocking | Should Have |
+| 12.9 Usability - API consistency | Consistent request/response formats | Should Have |
+| 12.10 Usability - Error messages | Clear, actionable error messages | Should Have |
+| 12.11 Maintainability - Code organization | Package structure, dependencies | Should Have |
+| 12.12 Maintainability - Documentation | Code comments, README files | Should Have |
+| 12.13 Performance review | Identify bottlenecks, optimize hot paths | Should Have |
+| 12.14 Fix identified issues | Address all critical and high findings | Must Have |
+| 12.15 Shift-left validation - API layer | Validate requests before workflow starts | Must Have |
+| 12.16 Shift-left validation - Workflow entry | Validate inputs at workflow start, fail early | Must Have |
+| 12.17 Shift-left validation - Activity inputs | Validate activity inputs before external calls | Should Have |
+
+**Shift-Left Validation Principles:**
+- Validate at API handlers before accepting requests
+- Validate workflow inputs immediately at workflow start
+- Validate activity inputs before making provider API calls
+- Return clear, actionable error messages at each validation point
+- Fail fast rather than letting invalid data propagate through the system
+
+**Deliverables:**
+- Security review report with findings
+- Best practices review report
+- Fixed issues and improved code
+- Updated documentation
+- Comprehensive input validation at all entry points
+
+**Validation:**
+- No critical security vulnerabilities
+- Consistent coding patterns across codebase
+- All tests pass after changes
+- Invalid inputs rejected with clear errors at earliest possible point
+
+---
+
+### Phase 13: Project Restructure (Multi-Service)
+
+Refactor project into a multi-service architecture for better team separation and deployment flexibility.
+
+**Goals:**
+- Separate services for independent deployment and scaling
+- Clear ownership boundaries for different teams
+- Shared documentation with service-specific docs
+- Simplified CI/CD per service
+
+**Proposed Structure:**
+
+```
+backend/payment-processing/
+├── docs/                           # Shared documentation
+│   ├── architecture/              # System-wide architecture
+│   ├── decisions/                 # Cross-cutting decisions
+│   └── api/                       # API standards
+│
+├── services/
+│   ├── payment-api/               # REST API service
+│   │   ├── cmd/                   # Entry point
+│   │   ├── internal/              # Service-specific code
+│   │   ├── docs/                  # Service docs
+│   │   ├── Dockerfile
+│   │   └── README.md
+│   │
+│   ├── payment-worker/            # Temporal worker service
+│   │   ├── cmd/
+│   │   ├── internal/
+│   │   ├── docs/
+│   │   ├── Dockerfile
+│   │   └── README.md
+│   │
+│   └── provider-simulator/        # Test simulator service
+│       ├── cmd/
+│       ├── internal/
+│       ├── docs/
+│       ├── Dockerfile
+│       └── README.md
+│
+├── pkg/                           # Shared packages
+│   ├── domain/                    # Shared domain types
+│   ├── logging/                   # Shared logging
+│   └── telemetry/                 # Shared observability
+│
+├── migrations/                    # Database migrations
+├── docker-compose.yml             # Local development
+└── Makefile                       # Build commands
+```
+
+**Tasks:**
+
+| Task | Description | Priority |
+|------|-------------|----------|
+| 13.1 Design service boundaries | Define what goes in each service | Must Have |
+| 13.2 Create services/ directory structure | Set up new layout | Must Have |
+| 13.3 Extract payment-api service | Move API handlers, middleware | Must Have |
+| 13.4 Extract payment-worker service | Move workflow, activities | Must Have |
+| 13.5 Move simulator to provider-simulator service | From tools/ to services/ | Must Have |
+| 13.6 Create pkg/ for shared code | Domain, logging, telemetry | Must Have |
+| 13.7 Update imports across services | Fix package references | Must Have |
+| 13.8 Create per-service Dockerfiles | Independent builds | Should Have |
+| 13.9 Update docker-compose for multi-service | Local dev environment | Should Have |
+| 13.10 Create per-service documentation | Service-specific READMEs | Should Have |
+| 13.11 Update CI/CD for multi-service | Per-service builds and deploys | Should Have |
+| 13.12 Verify all tests pass | Ensure nothing broken | Must Have |
+
+**Deliverables:**
+- Multi-service project structure
+- Independent service builds
+- Updated documentation
+- Working local development environment
+
+**Validation:**
+- Each service builds independently
+- All tests pass
+- Local docker-compose works
+- Clear separation of concerns
 
 ---
 
