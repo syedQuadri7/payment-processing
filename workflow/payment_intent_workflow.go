@@ -27,6 +27,12 @@ func PaymentIntentWorkflow(ctx workflow.Context, input PaymentWorkflowInput) (*P
 	logger := workflow.GetLogger(ctx)
 	logger.Info("Starting PaymentIntentWorkflow", "payment_intent_id", input.PaymentIntentID)
 
+	// 13.16: Shift-left validation - fail fast with clear errors at workflow entry
+	if err := input.Validate(); err != nil {
+		logger.Error("Workflow input validation failed", "error", err)
+		return nil, err
+	}
+
 	// Initialize workflow state
 	state := &PaymentState{
 		PaymentIntentID: input.PaymentIntentID,

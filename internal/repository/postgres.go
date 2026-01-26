@@ -24,12 +24,13 @@ type Config struct {
 }
 
 // DefaultConfig returns the default database configuration
+// NOTE: Password is intentionally empty - must be set via environment variable
 func DefaultConfig() Config {
 	return Config{
 		Host:     "localhost",
 		Port:     5432,
 		User:     "payment",
-		Password: "payment_secret",
+		Password: "", // Required - no default for security
 		Database: "payment_processing",
 		SSLMode:  "disable",
 	}

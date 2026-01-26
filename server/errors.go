@@ -144,11 +144,12 @@ func NewMissingHeaderError(header string) *APIError {
 }
 
 // NewInvalidStateTransitionError creates an invalid state transition error
+// L2: Uses generic message to avoid leaking implementation details
 func NewInvalidStateTransitionError(current, attempted string) *APIError {
 	return &APIError{
 		Type:    ErrorTypeBusinessRule,
-		Code:    "invalid_state_transition",
-		Message: "Cannot transition from " + current + " to " + attempted,
+		Code:    "invalid_state",
+		Message: "This operation is not permitted in the current state",
 	}
 }
 

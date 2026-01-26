@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -19,6 +20,49 @@ type PaymentWorkflowInput struct {
 	PaymentMethodID *string              `json:"payment_method_id,omitempty"`
 	IdempotencyKey  string               `json:"idempotency_key"`
 	Metadata        map[string]any       `json:"metadata,omitempty"`
+}
+
+// Validate performs shift-left validation on workflow input.
+// This catches invalid data at workflow entry before any activities run.
+func (i *PaymentWorkflowInput) Validate() error {
+	if i.PaymentIntentID == "" {
+		return fmt.Errorf("validation error: payment_intent_id is required")
+	}
+
+	if i.CustomerID == "" {
+		return fmt.Errorf("validation error: customer_id is required")
+	}
+
+	if i.Amount.LessThanOrEqual(decimal.Zero) {
+		return fmt.Errorf("validation error: amount must be greater than zero")
+	}
+
+	if i.Currency == "" {
+		return fmt.Errorf("validation error: currency is required")
+	}
+	if len(i.Currency) != 3 {
+		return fmt.Errorf("validation error: currency must be a 3-letter ISO code")
+	}
+
+	if i.Provider == "" {
+		return fmt.Errorf("validation error: provider is required")
+	}
+	if i.Provider != domain.ProviderStripe && i.Provider != domain.ProviderAdyen && i.Provider != domain.ProviderPayPal {
+		return fmt.Errorf("validation error: invalid provider '%s'", i.Provider)
+	}
+
+	if i.CaptureMethod == "" {
+		return fmt.Errorf("validation error: capture_method is required")
+	}
+	if i.CaptureMethod != domain.CaptureMethodAutomatic && i.CaptureMethod != domain.CaptureMethodManual {
+		return fmt.Errorf("validation error: invalid capture_method '%s'", i.CaptureMethod)
+	}
+
+	if i.IdempotencyKey == "" {
+		return fmt.Errorf("validation error: idempotency_key is required")
+	}
+
+	return nil
 }
 
 // PaymentWorkflowResult is the final result of a payment workflow

@@ -8,6 +8,20 @@ import (
 	"payment-processing/pkg/domain"
 )
 
+// Validation constants
+const (
+	// MaxMetadataKeys is the maximum number of metadata keys allowed
+	MaxMetadataKeys = 50
+	// MaxMetadataKeyLength is the maximum length of a metadata key
+	MaxMetadataKeyLength = 40
+	// MaxMetadataValueLength is the maximum length of a metadata value
+	MaxMetadataValueLength = 500
+	// MaxCustomerIDLength is the maximum length of a customer ID
+	MaxCustomerIDLength = 255
+	// MinCustomerIDLength is the minimum length of a customer ID
+	MinCustomerIDLength = 1
+)
+
 // CreatePaymentIntentRequest represents a request to create a payment intent
 type CreatePaymentIntentRequest struct {
 	Amount          string            `json:"amount"`
@@ -40,8 +54,18 @@ func (r *CreatePaymentIntentRequest) Validate() *APIError {
 		return NewValidationError("currency", "currency must be a 3-letter ISO 4217 code")
 	}
 
+	// M6: CustomerID format validation
 	if r.CustomerID == "" {
 		return NewValidationError("customer_id", "customer_id is required")
+	}
+	if len(r.CustomerID) < MinCustomerIDLength || len(r.CustomerID) > MaxCustomerIDLength {
+		return NewValidationError("customer_id", "customer_id must be between 1 and 255 characters")
+	}
+	// Validate CustomerID contains only allowed characters (alphanumeric, underscore, dash)
+	for _, c := range r.CustomerID {
+		if !isAllowedIDChar(c) {
+			return NewValidationError("customer_id", "customer_id contains invalid characters (allowed: a-z, A-Z, 0-9, _, -)")
+		}
 	}
 
 	if r.Provider == "" {
@@ -56,6 +80,50 @@ func (r *CreatePaymentIntentRequest) Validate() *APIError {
 		cm := domain.CaptureMethod(r.CaptureMethod)
 		if cm != domain.CaptureMethodAutomatic && cm != domain.CaptureMethodManual {
 			return NewValidationError("capture_method", "capture_method must be automatic or manual")
+		}
+	}
+
+	// M5: Metadata validation
+	if err := validateMetadata(r.Metadata); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// isAllowedIDChar checks if a character is allowed in IDs (alphanumeric, underscore, dash)
+func isAllowedIDChar(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+}
+
+// validateMetadata validates metadata map keys and values
+func validateMetadata(metadata map[string]string) *APIError {
+	if metadata == nil {
+		return nil
+	}
+
+	if len(metadata) > MaxMetadataKeys {
+		return NewValidationError("metadata", "metadata cannot have more than 50 keys")
+	}
+
+	for key, value := range metadata {
+		// Validate key
+		if key == "" {
+			return NewValidationError("metadata", "metadata keys cannot be empty")
+		}
+		if len(key) > MaxMetadataKeyLength {
+			return NewValidationError("metadata", "metadata key '"+key+"' exceeds maximum length of 40 characters")
+		}
+		// Keys must be alphanumeric with underscores
+		for _, c := range key {
+			if !isAllowedIDChar(c) {
+				return NewValidationError("metadata", "metadata key '"+key+"' contains invalid characters (allowed: a-z, A-Z, 0-9, _, -)")
+			}
+		}
+
+		// Validate value length
+		if len(value) > MaxMetadataValueLength {
+			return NewValidationError("metadata", "metadata value for key '"+key+"' exceeds maximum length of 500 characters")
 		}
 	}
 
