@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"go.temporal.io/sdk/activity"
 
 	"payment-processing/shared/domain"
@@ -27,8 +28,37 @@ func (a *Activities) PersistPaymentState(ctx context.Context, input PersistPayme
 		"status", input.Status,
 	)
 
-	// TODO: Use repository to persist state
-	// This should be idempotent using optimistic locking
+	if a.PaymentIntentRepo == nil {
+		logger.Warn("PaymentIntentRepository not configured, skipping state persist")
+		return nil
+	}
+
+	// Get current payment intent
+	pi, err := a.PaymentIntentRepo.GetByID(ctx, input.PaymentIntentID)
+	if err != nil {
+		return fmt.Errorf("getting payment intent: %w", err)
+	}
+	if pi == nil {
+		return fmt.Errorf("payment intent not found: %s", input.PaymentIntentID)
+	}
+
+	// Update status
+	pi.Status = input.Status
+
+	// Update provider payment ID if provided
+	if input.ProviderPaymentID != nil {
+		pi.ProviderPaymentID = input.ProviderPaymentID
+	}
+
+	// Persist changes
+	if err := a.PaymentIntentRepo.Update(ctx, pi); err != nil {
+		return fmt.Errorf("updating payment intent: %w", err)
+	}
+
+	logger.Info("Payment state persisted successfully",
+		"payment_intent_id", input.PaymentIntentID,
+		"status", input.Status,
+	)
 	return nil
 }
 
@@ -61,9 +91,10 @@ func (a *Activities) WriteOutboxEvent(ctx context.Context, input WriteOutboxEven
 		return fmt.Errorf("marshaling outbox payload: %w", err)
 	}
 
-	// Use idempotency key as event ID to prevent duplicates
+	// Generate UUID for event ID, using idempotency key for deduplication via unique constraint
+	eventID := uuid.New().String()
 	event := &domain.OutboxEvent{
-		ID:            input.IdempotencyKey,
+		ID:            eventID,
 		AggregateType: domain.AggregateType(input.AggregateType),
 		AggregateID:   input.AggregateID,
 		EventType:     domain.OutboxEventType(input.EventType),

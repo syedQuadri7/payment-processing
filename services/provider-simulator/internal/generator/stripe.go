@@ -114,11 +114,9 @@ func (g *StripeGenerator) buildPaymentIntent(eventType string, data map[string]a
 		}
 	}
 
-	// Merge any additional data
-	for k, v := range data {
-		if k != "payment_id" && k != "amount" && k != "currency" && k != "decline_code" {
-			obj[k] = v
-		}
+	// Include metadata if present
+	if metadata, ok := data["metadata"].(map[string]string); ok {
+		obj["metadata"] = metadata
 	}
 
 	return obj

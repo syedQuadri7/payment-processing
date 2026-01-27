@@ -22,6 +22,7 @@ var (
 	declineCode   string
 	skipSignature bool
 	invalidKey    bool
+	internalID    string
 )
 
 var sendCmd = &cobra.Command{
@@ -59,6 +60,7 @@ func init() {
 	sendCmd.Flags().StringVar(&declineCode, "decline-code", "", "Decline code for failed payments")
 	sendCmd.Flags().BoolVar(&skipSignature, "skip-signature", false, "Omit signature header")
 	sendCmd.Flags().BoolVar(&invalidKey, "invalid-key", false, "Use invalid signing key")
+	sendCmd.Flags().StringVar(&internalID, "internal-id", "", "Internal payment intent ID (for webhook correlation)")
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
@@ -90,6 +92,11 @@ func runSend(cmd *cobra.Command, args []string) error {
 	if declineCode != "" {
 		data["decline_code"] = declineCode
 		data["reason"] = declineCode
+	}
+	if internalID != "" {
+		data["metadata"] = map[string]string{
+			"internal_id": internalID,
+		}
 	}
 
 	// Generate payload

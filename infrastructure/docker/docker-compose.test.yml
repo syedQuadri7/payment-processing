@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Testing environment with provider simulator enabled
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.test.yml up
 
@@ -34,6 +32,15 @@ services:
       postgres:
         condition: service_healthy
 
+  temporal-ui:
+    image: temporalio/ui:2.44.1
+    ports:
+      - "8088:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - temporal
+
   payment-api:
     build:
       context: ../..
@@ -53,6 +60,11 @@ services:
       - STRIPE_API_URL=http://provider-simulator:9000/stripe
       - ADYEN_API_URL=http://provider-simulator:9000/adyen
       - PAYPAL_API_URL=http://provider-simulator:9000/paypal
+      # Webhook signing secrets (match simulator defaults)
+      - STRIPE_WEBHOOK_SECRET=whsec_test_secret
+      - ADYEN_HMAC_KEY=test_hmac_key
+      - PAYPAL_CLIENT_ID=test_client
+      - PAYPAL_CLIENT_SECRET=test_secret
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,3 +97,4 @@ services:
     environment:
       - PORT=9000
       - WEBHOOK_TARGET_URL=http://payment-api:8080/webhooks
+    command: ["server", "--port", "9000"]

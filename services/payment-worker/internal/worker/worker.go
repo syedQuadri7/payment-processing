@@ -36,6 +36,7 @@ func StartWorkerWithDependencies(c client.Client, repos *domain.Repositories) er
 			repos.PaymentAttempts,
 			repos.Outbox,
 			repos.AuditLog,
+			repos.PaymentIntents,
 		)
 	} else {
 		activities = workflow.NewActivities()

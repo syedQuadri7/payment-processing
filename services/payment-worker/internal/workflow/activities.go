@@ -35,12 +35,20 @@ type AuditLogRepository interface {
 	Create(ctx context.Context, entry *domain.AuditLogEntry) error
 }
 
+// PaymentIntentRepository defines the interface for payment intent persistence
+type PaymentIntentRepository interface {
+	GetByID(ctx context.Context, id string) (*domain.PaymentIntent, error)
+	UpdateStatus(ctx context.Context, id string, status domain.PaymentIntentStatus) error
+	Update(ctx context.Context, pi *domain.PaymentIntent) error
+}
+
 // Activities holds the dependencies for workflow activities
 type Activities struct {
-	DeclineCodeRepo    DeclineCodeRepository
-	PaymentAttemptRepo PaymentAttemptRepository
-	OutboxRepo         OutboxRepository
-	AuditLogRepo       AuditLogRepository
+	DeclineCodeRepo     DeclineCodeRepository
+	PaymentAttemptRepo  PaymentAttemptRepository
+	OutboxRepo          OutboxRepository
+	AuditLogRepo        AuditLogRepository
+	PaymentIntentRepo   PaymentIntentRepository
 }
 
 // NewActivities creates a new Activities instance
@@ -54,12 +62,14 @@ func NewActivitiesWithDependencies(
 	paymentAttemptRepo PaymentAttemptRepository,
 	outboxRepo OutboxRepository,
 	auditLogRepo AuditLogRepository,
+	paymentIntentRepo PaymentIntentRepository,
 ) *Activities {
 	return &Activities{
-		DeclineCodeRepo:    declineCodeRepo,
-		PaymentAttemptRepo: paymentAttemptRepo,
-		OutboxRepo:         outboxRepo,
-		AuditLogRepo:       auditLogRepo,
+		DeclineCodeRepo:     declineCodeRepo,
+		PaymentAttemptRepo:  paymentAttemptRepo,
+		OutboxRepo:          outboxRepo,
+		AuditLogRepo:        auditLogRepo,
+		PaymentIntentRepo:   paymentIntentRepo,
 	}
 }
 

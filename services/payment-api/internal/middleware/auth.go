@@ -82,7 +82,11 @@ func parseAPIKey(key string) (*APIKeyInfo, error) {
 
 	// For now, use a placeholder merchant ID
 	// Production would look up the key in the database
-	info.MerchantID = "merchant_" + parts[2][:8] // Use first 8 chars of key suffix
+	suffix := parts[2]
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	info.MerchantID = "merchant_" + suffix
 
 	return info, nil
 }
