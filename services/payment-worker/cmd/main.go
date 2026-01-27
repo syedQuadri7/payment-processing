@@ -7,9 +7,9 @@ import (
 
 	"go.temporal.io/sdk/client"
 
-	"payment-processing/internal/repository"
-	"payment-processing/pkg/domain"
-	"payment-processing/worker"
+	"payment-processing/shared/repository"
+	"payment-processing/shared/domain"
+	"payment-processing/services/payment-worker/internal/worker"
 )
 
 func main() {

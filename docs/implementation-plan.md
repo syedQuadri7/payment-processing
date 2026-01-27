@@ -83,12 +83,12 @@ Establishes the persistence layer following the schema documentation.
 | 1.12 Create clearing accounts seed data | ledger-tables.md | Must Have |
 
 **Deliverables:**
-- All migrations in `internal/database/migrations/`
+- All migrations in `shared/database/migrations/`
 - Migration tests verifying up/down operations
 - Seed data for decline codes and clearing accounts
 
 **Validation:**
-- `go test ./internal/repository/...` passes
+- `go test ./shared/repository/...` passes
 - Migrations can be applied and rolled back cleanly
 
 ---
@@ -114,12 +114,12 @@ Completes the domain model with all entities and business rules.
 | 2.7 Implement journal entry balance validation | FR-LED-03 | Must Have |
 
 **Deliverables:**
-- Complete domain types in `internal/domain/`
+- Complete domain types in `shared/domain/`
 - Unit tests for state machine transitions
 - Unit tests for balance calculations
 
 **Validation:**
-- `go test ./internal/domain/...` with >80% coverage
+- `go test ./shared/domain/...` with >80% coverage
 
 ---
 
@@ -150,7 +150,7 @@ Implements all database operations with proper concurrency handling.
 | 3.12 Add SELECT FOR UPDATE for payment updates | FR-CON-02 | Must Have |
 
 **Deliverables:**
-- Complete repository implementations in `internal/repository/`
+- Complete repository implementations in `shared/repository/`
 - Integration tests against test database
 - Transaction helper utilities
 
@@ -187,8 +187,8 @@ Implements the adapter layer for provider webhook normalization.
 | 4.11 Implement provider-specific HTTP response formats | FR-ADP-07 | Must Have |
 
 **Deliverables:**
-- Adapter implementations in `internal/adapter/`
-- Webhook handlers in `server/webhooks/`
+- Adapter implementations in `shared/adapter/`
+- Webhook handlers in `services/payment-api/internal/handlers/`
 - Unit tests with sample webhook payloads
 
 **Validation:**
@@ -222,8 +222,8 @@ Implements the Temporal workflow following FD-011 patterns.
 | 5.10 Add activity retry policies | FD-018 | Must Have |
 
 **Deliverables:**
-- Workflow definition in `workflow/payment_workflow.go`
-- Activities in `workflow/activities/`
+- Workflow definition in `services/payment-worker/internal/workflow/payment_intent_workflow.go`
+- Activities in `services/payment-worker/internal/workflow/`
 - Workflow tests using Temporal test framework
 
 **Validation:**
@@ -255,12 +255,12 @@ Implements intelligent retry logic for soft declines.
 
 **Implementation Summary:**
 
-Activities added to `workflow/persistence_activities.go`:
+Activities added to `services/payment-worker/internal/workflow/persistence_activities.go`:
 - `ClassifyDecline` - Looks up provider-specific decline codes from `decline_code_mappings` table, returns canonical classification with retry eligibility
 - `CreatePaymentAttempt` - Creates immutable attempt record in PENDING status
 - `CompletePaymentAttempt` - Updates attempt with final status and decline details
 
-Workflow changes in `workflow/payment_intent_workflow.go`:
+Workflow changes in `services/payment-worker/internal/workflow/payment_intent_workflow.go`:
 - Authorization loop generates unique attempt IDs via `workflow.SideEffect`
 - Creates attempt record before each authorization call
 - Calls `ClassifyDecline` to map provider codes to canonical codes
@@ -268,7 +268,7 @@ Workflow changes in `workflow/payment_intent_workflow.go`:
 - `waitWithSignals` now listens for payment method update signal during RECOVERING state
 - Immediate retry triggered when payment method updated (skips remaining wait)
 
-Repository interfaces added to `workflow/activities.go`:
+Repository interfaces added to `services/payment-worker/internal/workflow/activities.go`:
 - `DeclineCodeRepository` - For database decline code lookup
 - `PaymentAttemptRepository` - For attempt persistence
 - `NewActivitiesWithDependencies` constructor for production use
@@ -309,7 +309,7 @@ Implements the bookkeeping system.
 
 **Implementation Summary:**
 
-Activities added to `workflow/ledger_activities.go`:
+Activities added to `services/payment-worker/internal/workflow/ledger_activities.go`:
 - `PlaceAuthorizationHold` - Increases pending_balance on customer account (no ledger entry - authorization is a promise, not money movement)
 - `ReleaseAuthorizationHold` - Decreases pending_balance on customer account (for void or expiration)
 - `RecordCapture` - Creates balanced journal entry with debit to customer, credit to settlement clearing; updates account balances with optimistic locking
@@ -379,31 +379,34 @@ Implements the REST API following documentation.
 
 **Implementation Summary:**
 
-Middleware in `server/middleware/`:
+Middleware in `services/payment-api/internal/middleware/`:
 - `auth.go` - API key authentication with sk_/pk_ prefix parsing, test/live mode detection, context injection for merchant ID and key type
 - `ratelimit.go` - In-memory sliding window rate limiter (300 read/100 write requests per minute per merchant)
 - `idempotency.go` - 24-hour TTL cache for idempotent responses, conflict detection for concurrent requests
 - `requestid.go` - Unique request ID generation and propagation
+- `bodysize.go` - Request body size limits
 
-Handlers in `server/handlers/`:
+Handlers in `services/payment-api/internal/handlers/`:
 - `intents.go` - Payment intent CRUD operations (create, get, attach method, capture, cancel, get attempts, get hold)
 - `webhooks.go` - Provider webhook endpoints with signature verification and workflow signaling
 - `health.go` - Health check endpoints (overall, liveness, readiness probes)
 - `metrics.go` - Prometheus-format metrics collector and endpoint
+- `audit.go` - Audit log query endpoints
 
-Types and errors in `server/`:
+Types and errors in `services/payment-api/`:
 - `types.go` - Request/response types with validation
 - `errors.go` - Standardized API error responses (validation, auth, not found, conflict, business rule, rate limit)
 
-Server wiring in `main.go`:
+Server wiring in `services/payment-api/cmd/main.go`:
 - Builds HTTP handler with middleware chain (request ID -> auth -> idempotency -> rate limit)
-- Conditional database setup (graceful degradation if not configured)
-- Routing using standard library `http.ServeMux` with manual path parameter extraction
+- Database connection required in production
+- Routing using chi router with path parameter extraction
+- Graceful shutdown with signal handling
 
 **Deliverables:**
-- HTTP handlers in `server/handlers/`
-- Middleware in `server/middleware/`
-- Types and errors in `server/`
+- HTTP handlers in `services/payment-api/internal/handlers/`
+- Middleware in `services/payment-api/internal/middleware/`
+- Types and errors in `services/payment-api/`
 
 **Validation:**
 - All code compiles successfully
@@ -433,18 +436,18 @@ Implements reliable event publishing via CDC.
 
 **Implementation Summary:**
 
-Activities updated in `workflow/`:
+Activities updated in `services/payment-worker/internal/workflow/`:
 - `WriteOutboxEvent` - Writes events to outbox table with idempotency via event ID
 - `Activities` struct now includes `OutboxRepo` for database access
 
-Outbox consumer in `internal/outbox/`:
+Outbox consumer in `shared/outbox/`:
 - `Consumer` - Polls outbox table, processes events via handlers, marks as published
 - `LoggingHandler` - Simple handler that logs events (for development)
 - `IdempotentHandler` - Wrapper ensuring events are processed exactly once
 - `PaymentEventHandler` - Routes payment events to type-specific handlers
 - `ChainHandlers` - Combines multiple handlers for processing pipelines
 
-Worker updates in `worker/`:
+Worker updates in `services/payment-worker/internal/worker/`:
 - `StartWorkerWithDependencies` - Accepts repositories and wires up activities
 - All PaymentIntentWorkflow activities now registered with dependencies
 
@@ -497,23 +500,23 @@ Implements audit logging and monitoring.
 
 **Implementation Summary:**
 
-Audit logging in `workflow/persistence_activities.go`:
+Audit logging in `services/payment-worker/internal/workflow/persistence_activities.go`:
 - `WriteAuditLog` activity - Writes audit entries with old/new values, actor info, and metadata
 - Supports correlation ID, provider, workflow ID, and request ID tracking
 - Idempotent writes using activity attempt number in entry ID
 
-Structured logging in `internal/logging/`:
+Structured logging in `shared/logging/`:
 - `Logger` - JSON-formatted structured logger with level filtering
 - Context propagation for correlation ID, request ID, workflow ID, provider
 - `FieldLogger` - Logger with pre-set fields for component-specific logging
 - `WithCorrelationID`, `WithRequestID`, etc. for context enrichment
 
-Correlation ID middleware in `server/middleware/correlation.go`:
+Correlation ID middleware in `services/payment-api/internal/middleware/correlation.go`:
 - Extracts or generates correlation ID for each request
 - Propagates via X-Correlation-ID header
 - Adds to context for downstream logging
 
-Metrics in `server/handlers/metrics.go`:
+Metrics in `services/payment-api/internal/handlers/metrics.go`:
 - `payment_intents_total{provider, status}` - Counter by provider and status
 - `payment_decline_total{provider, canonical_code}` - Decline counter
 - `webhook_received_total{provider, event_type}` - Webhook counter
@@ -522,7 +525,7 @@ Metrics in `server/handlers/metrics.go`:
 - `payment_authorization_duration_seconds{provider}` - Auth latency
 - `webhook_processing_duration_seconds{provider}` - Webhook latency
 
-Audit query endpoints in `server/handlers/audit.go`:
+Audit query endpoints in `services/payment-api/internal/handlers/audit.go`:
 - `GET /api/v1/audit/entity/{type}/{id}` - Query by entity
 - `GET /api/v1/audit/actor/{type}/{id}` - Query by actor
 - `GET /api/v1/audit/action/{action}` - Query by action type
@@ -553,10 +556,10 @@ Refactor project into a multi-service architecture for better team separation an
 - Simplified CI/CD per service
 - Docker-based local development environment
 
-**Proposed Structure:**
+**Final Structure:**
 
 ```text
-backend/payment-processing/
+payment-processing/
 ├── docs/                           # Shared documentation
 │   ├── architecture/              # System-wide architecture
 │   ├── decisions/                 # Cross-cutting decisions
@@ -565,39 +568,47 @@ backend/payment-processing/
 ├── infrastructure/                 # Infrastructure configuration
 │   ├── docker/                    # Docker configurations
 │   │   ├── docker-compose.yml     # Local development
-│   │   ├── docker-compose.test.yml # Testing environment
-│   │   └── docker-compose.prod.yml # Production reference
+│   │   └── docker-compose.test.yml # Testing environment
 │   └── scripts/                   # Deployment and ops scripts
 │
-├── services/
+├── services/                       # All microservices
 │   ├── payment-api/               # REST API service
 │   │   ├── cmd/                   # Entry point
 │   │   ├── internal/              # Service-specific code
-│   │   ├── docs/                  # Service docs
+│   │   │   ├── handlers/          # HTTP request handlers
+│   │   │   └── middleware/        # HTTP middleware
+│   │   ├── server.go              # Legacy server setup
+│   │   ├── errors.go              # API error types
+│   │   ├── types.go               # API request/response types
 │   │   ├── Dockerfile
 │   │   └── README.md
 │   │
 │   ├── payment-worker/            # Temporal worker service
-│   │   ├── cmd/
-│   │   ├── internal/
-│   │   ├── docs/
+│   │   ├── cmd/                   # Entry point
+│   │   ├── internal/              # Service-specific code
+│   │   │   ├── worker/            # Worker setup and registration
+│   │   │   └── workflow/          # Workflow and activity definitions
 │   │   ├── Dockerfile
 │   │   └── README.md
 │   │
-│   └── provider-simulator/        # Test simulator service
-│       ├── cmd/
-│       ├── internal/
-│       ├── docs/
+│   └── provider-simulator/        # Test simulator service (standalone)
+│       ├── main.go
 │       ├── Dockerfile
 │       └── README.md
 │
-├── pkg/                           # Shared packages
-│   ├── domain/                    # Shared domain types
-│   ├── logging/                   # Shared logging
-│   └── telemetry/                 # Shared observability
+├── shared/                         # Shared libraries (used by all services)
+│   ├── domain/                    # Domain types and interfaces
+│   ├── repository/                # Database access layer
+│   ├── adapter/                   # Provider webhook adapters
+│   ├── database/                  # Database migrations
+│   ├── logging/                   # Structured logging
+│   ├── outbox/                    # Outbox pattern implementation
+│   └── workflowtypes/             # Shared workflow types and constants
 │
-├── migrations/                    # Database migrations
-└── Makefile                       # Build commands
+├── go.mod                         # Root module
+├── go.sum
+├── Makefile                       # Build and development commands
+└── README.md
 ```
 
 **Tasks:**
@@ -631,24 +642,35 @@ backend/payment-processing/
 Directory structure created:
 - `infrastructure/docker/` - Docker Compose configurations for dev and test
 - `services/payment-api/` - REST API service with Dockerfile and entry point
+  - `services/payment-api/internal/handlers/` - HTTP request handlers
+  - `services/payment-api/internal/middleware/` - HTTP middleware (auth, rate limit, etc.)
 - `services/payment-worker/` - Temporal worker service with Dockerfile and entry point
+  - `services/payment-worker/internal/worker/` - Worker setup and registration
+  - `services/payment-worker/internal/workflow/` - Workflow and activity definitions
 - `services/provider-simulator/` - Moved from tools/webhook-simulator
-- `pkg/domain/` - Shared domain types (moved from internal/domain)
-- `pkg/logging/` - Shared logging utilities (moved from internal/logging)
+- `shared/domain/` - Shared domain types
+- `shared/repository/` - Database access layer
+- `shared/adapter/` - Provider webhook adapters
+- `shared/database/` - Database migrations
+- `shared/logging/` - Structured logging utilities
+- `shared/outbox/` - Outbox pattern implementation
+- `shared/workflowtypes/` - Shared workflow types and constants for cross-service use
 
 Key changes:
-- All imports updated from `payment-processing/internal/domain` to `payment-processing/pkg/domain`
-- All imports updated from `payment-processing/internal/logging` to `payment-processing/pkg/logging`
+- All imports updated to use `payment-processing/shared/...` paths
+- Service-specific code moved to `services/*/internal/` (Go internal package rules apply)
+- `shared/workflowtypes/` created to enable workflow type sharing between services
 - Makefile updated with service-specific build targets (`make build-api`, `make build-worker`)
 - Docker Compose supports dev (`make dev-up`) and test (`make test-up`) environments
 - Each service has its own Dockerfile and README
-- Root main.go preserved as combined entry point for backwards compatibility
+- Root main.go removed (services have independent entry points)
 
 **Validation:**
 - Each service builds independently: `make build-api`, `make build-worker`, `make build-simulator`
 - All tests pass: `go test ./...`
 - Docker Compose works from `infrastructure/docker/`
-- Clear separation: shared code in `pkg/`, services in `services/`, infrastructure in `infrastructure/`
+- Clear separation: shared code in `shared/`, services in `services/`, infrastructure in `infrastructure/`
+- Go internal package rules enforced: payment-api cannot import from payment-worker/internal and vice versa
 
 ---
 
@@ -734,10 +756,10 @@ Security review completed (13.1-13.4):
 
 High priority fixes applied (13.14):
 - H2: Fail fast on missing database configuration (`services/payment-api/cmd/main.go`)
-- H3: Removed hardcoded database password (`internal/repository/postgres.go`)
-- M4: Added request body size limits (`server/middleware/bodysize.go`)
-- M5: Added metadata validation (`server/types.go`)
-- M6: Added CustomerID format validation (`server/types.go`)
+- H3: Removed hardcoded database password (`shared/repository/postgres.go`)
+- M4: Added request body size limits (`services/payment-api/internal/middleware/bodysize.go`)
+- M5: Added metadata validation (`services/payment-api/types.go`)
+- M6: Added CustomerID format validation (`services/payment-api/types.go`)
 
 Shift-left validation completed (13.15-13.16):
 - API layer: Enhanced request validation with metadata/customerID checks

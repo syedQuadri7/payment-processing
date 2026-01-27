@@ -93,14 +93,15 @@ cd payment-processing
 # Install dependencies
 go mod download
 
-# Start infrastructure (Temporal, PostgreSQL, Kafka)
-docker-compose up -d
+# Start infrastructure (Temporal, PostgreSQL)
+make dev-up
 
-# Run database migrations
-go run cmd/migrate/main.go
+# Build all services
+make build
 
-# Start the service
-go run main.go
+# Start all services (in separate terminals or use docker-compose)
+./bin/payment-api      # REST API on port 8080
+./bin/payment-worker   # Temporal worker
 ```
 
 ### Configuration
@@ -169,23 +170,27 @@ Declines are classified into categories determining retry behavior:
 
 ```
 payment-processing/
-├── cmd/
-│   ├── api/            # API server entrypoint
-│   ├── worker/         # Temporal worker entrypoint
-│   └── migrate/        # Database migrations
-├── internal/
-│   ├── adapter/        # Provider webhook adapters
-│   │   ├── stripe/
-│   │   ├── adyen/
-│   │   └── paypal/
-│   ├── api/            # HTTP handlers and middleware
-│   ├── workflow/       # Temporal workflows
-│   ├── activity/       # Temporal activities
-│   ├── domain/         # Domain entities
-│   └── repository/     # Data access
-├── migrations/         # SQL migrations
-├── docs/               # Documentation
-└── deployments/        # Docker and infrastructure
+├── services/                       # Microservices
+│   ├── payment-api/               # REST API service
+│   │   ├── cmd/                   # Entry point
+│   │   └── internal/              # Handlers, middleware
+│   ├── payment-worker/            # Temporal worker service
+│   │   ├── cmd/                   # Entry point
+│   │   └── internal/              # Worker, workflows, activities
+│   └── provider-simulator/        # Testing tool for webhooks
+├── shared/                         # Shared libraries
+│   ├── domain/                    # Domain types and interfaces
+│   ├── repository/                # Database access layer
+│   ├── adapter/                   # Provider webhook adapters
+│   ├── database/                  # Migrations
+│   ├── logging/                   # Structured logging
+│   ├── outbox/                    # Transactional outbox
+│   └── workflowtypes/             # Shared workflow types
+├── infrastructure/                 # Docker and scripts
+│   └── docker/                    # Docker Compose files
+├── docs/                          # Documentation
+├── go.mod
+└── Makefile
 ```
 
 ## Documentation
@@ -216,8 +221,8 @@ payment-processing/
 # All tests
 go test ./...
 
-# Specific package
-go test ./workflow/...
+# Specific package (e.g., workflow tests)
+go test ./services/payment-worker/internal/workflow/...
 
 # With coverage
 go test -cover ./...
@@ -226,11 +231,33 @@ go test -cover ./...
 ### Building
 
 ```bash
-# Build binary
-go build -o payment-processing .
+# Build all services
+make build
 
-# Run
-./payment-processing
+# Build individual services
+make build-api
+make build-worker
+make build-simulator
+
+# Run services (after building)
+./bin/payment-api
+./bin/payment-worker
+```
+
+### Docker Development
+
+```bash
+# Start dev dependencies (PostgreSQL, Temporal)
+make dev-up
+
+# Start all services including API and worker
+make dev-up-all
+
+# Stop development stack
+make dev-down
+
+# Start test environment with provider simulator
+make test-up
 ```
 
 ## Key Patterns Implemented

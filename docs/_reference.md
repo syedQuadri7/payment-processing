@@ -88,8 +88,9 @@ Reference for database structure and usage patterns.
 
 | Document | Purpose |
 |----------|---------|
-| [Simulations Overview](simulations/readme.md) | Using the webhook simulator for testing |
-| [Webhook Simulator README](../tools/webhook-simulator/README.md) | Full simulator documentation |
+| [Simulations Overview](simulations/readme.md) | Using the provider simulator for testing |
+| [Simulator API](simulations/simulator-api.md) | Simulator API details |
+| [Provider Simulator README](../services/provider-simulator/README.md) | Full simulator documentation |
 
 ## By Task
 
@@ -118,7 +119,7 @@ Reference for database structure and usage patterns.
 
 ### "I need to test webhook handling"
 1. [Simulations Overview](simulations/readme.md)
-2. [Webhook Simulator README](../tools/webhook-simulator/README.md)
+2. [Provider Simulator README](../services/provider-simulator/README.md)
 
 ### "I need to debug a payment issue"
 1. [Schema: Outbox & Audit](schema/outbox-audit.md) - audit_log queries

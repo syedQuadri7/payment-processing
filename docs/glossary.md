@@ -426,6 +426,22 @@ The provider-agnostic parts of the codebase: workflows, ledger, outbox. Never co
 
 The provider-specific parts of the codebase. Handles webhook verification, event mapping, and API calls for each provider.
 
+### Shared Package
+
+Code in the `shared/` directory that is used by multiple services. Contains domain types, repositories, adapters, and other reusable components. Using `shared/` instead of Go's `internal/` allows cross-service imports.
+
+### Service-Specific Code
+
+Code in a service's `internal/` directory (e.g., `services/payment-api/internal/`) that is private to that service. Go's internal package rules prevent other services from importing this code.
+
+### Workflow Types
+
+Shared types and constants in `shared/workflowtypes/` that define the contract between services for Temporal workflows. Includes workflow input/output types, signal names, and task queue constants.
+
+### Multi-Service Architecture
+
+The project structure where functionality is split into independently deployable services (payment-api, payment-worker) that share common libraries through the `shared/` directory.
+
 ### Recovery Workflow
 
 A child workflow spawned when a soft decline occurs. Manages the retry schedule and attempts to recover the payment.

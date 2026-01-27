@@ -52,24 +52,44 @@ All documentation lives in `docs/`. Start with `docs/_reference.md` for navigati
 
 ```text
 payment-processing/
-├── docs/                           # Shared documentation
+├── docs/                           # Documentation (unchanged)
 ├── infrastructure/                 # Infrastructure configuration
-│   └── docker/                    # Docker Compose files
-├── services/                       # Microservices
+│   ├── docker/                    # Docker Compose files
+│   └── scripts/                   # Deployment scripts
+│
+├── services/                       # All microservices
 │   ├── payment-api/               # REST API service
+│   │   ├── cmd/                   # Service entry point
+│   │   ├── internal/              # Service-specific code
+│   │   │   ├── handlers/          # HTTP request handlers
+│   │   │   └── middleware/        # HTTP middleware
+│   │   ├── server.go              # Legacy server setup
+│   │   ├── errors.go              # API error types
+│   │   ├── types.go               # API request/response types
+│   │   └── Dockerfile
+│   │
 │   ├── payment-worker/            # Temporal worker service
-│   └── provider-simulator/        # Test simulator service
-├── pkg/                           # Shared packages
-│   ├── domain/                    # Shared domain types
-│   └── logging/                   # Shared logging
-├── internal/                       # Internal packages
+│   │   ├── cmd/                   # Service entry point
+│   │   ├── internal/              # Service-specific code
+│   │   │   ├── worker/            # Worker setup and registration
+│   │   │   └── workflow/          # Workflow and activity definitions
+│   │   └── Dockerfile
+│   │
+│   └── provider-simulator/        # Test simulator service (standalone)
+│
+├── shared/                         # Shared libraries (used by all services)
+│   ├── domain/                    # Domain types and interfaces
+│   ├── repository/                # Database access layer
 │   ├── adapter/                   # Provider webhook adapters
-│   ├── outbox/                    # Outbox consumer
-│   └── repository/                # Database access layer
-├── server/                        # HTTP server (shared by API service)
-├── worker/                        # Temporal worker setup
-├── workflow/                      # Workflow definitions and activities
-└── main.go                        # Combined entry point (legacy)
+│   ├── database/                  # Database migrations
+│   ├── logging/                   # Structured logging
+│   ├── outbox/                    # Outbox pattern implementation
+│   └── workflowtypes/             # Shared workflow types and constants
+│
+├── go.mod                         # Root module
+├── go.sum
+├── Makefile                       # Build and development commands
+└── README.md
 ```
 
 ## Build and Run Commands
@@ -83,14 +103,11 @@ make build-api
 make build-worker
 make build-simulator
 
-# Build combined binary (legacy)
-make build-combined
-
 # Run tests
 go test ./...
 
 # Run single test
-go test -run TestName ./workflow/...
+go test -run TestName ./services/payment-worker/internal/workflow/...
 ```
 
 ## Docker Development
@@ -114,16 +131,18 @@ make test-down
 
 ## Architecture
 
-The service is split into two main components that can run separately or together:
+The system is split into two independently deployable services:
 
 ### Payment API Service (`services/payment-api/`)
 - REST API for payment operations (port 8080)
 - Webhook endpoints for Stripe, Adyen, PayPal
 - Outbox consumer for event publishing
+- Entry point: `services/payment-api/cmd/main.go`
 
 ### Payment Worker Service (`services/payment-worker/`)
 - Temporal worker on `payment-processing` task queue
 - Executes workflows and activities
+- Entry point: `services/payment-worker/cmd/main.go`
 
 See `docs/architecture/system-design.md` for full architecture diagrams.
 
@@ -131,17 +150,18 @@ See `docs/architecture/system-design.md` for full architecture diagrams.
 
 | Path | Purpose |
 |------|---------|
-| `main.go` | Combined entry point (runs both API and worker) |
-| `services/payment-api/` | REST API service |
-| `services/payment-worker/` | Temporal worker service |
+| `services/payment-api/cmd/` | API service entry point |
+| `services/payment-api/internal/handlers/` | HTTP request handlers |
+| `services/payment-api/internal/middleware/` | HTTP middleware (auth, rate limit, etc.) |
+| `services/payment-worker/cmd/` | Worker service entry point |
+| `services/payment-worker/internal/worker/` | Temporal worker setup and registration |
+| `services/payment-worker/internal/workflow/` | Workflow and activity definitions |
 | `services/provider-simulator/` | Testing tool for simulating provider webhooks |
-| `server/` | HTTP handlers and middleware |
-| `worker/` | Temporal worker setup and registration |
-| `workflow/` | Workflow definitions and activities |
-| `pkg/domain/` | Shared domain types |
-| `pkg/logging/` | Shared structured logging |
-| `internal/adapter/` | Provider-specific webhook adapters |
-| `internal/repository/` | Database access layer |
+| `shared/domain/` | Shared domain types and interfaces |
+| `shared/repository/` | Database access layer |
+| `shared/adapter/` | Provider-specific webhook adapters |
+| `shared/workflowtypes/` | Shared workflow types and constants |
+| `shared/logging/` | Shared structured logging |
 | `infrastructure/docker/` | Docker Compose configurations |
 
 ## Key Architectural Patterns

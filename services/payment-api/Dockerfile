@@ -28,7 +28,7 @@ RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /app/payment-api .
 
 # Copy migrations
-COPY --from=builder /app/internal/database/migrations ./migrations
+COPY --from=builder /app/shared/database/migrations ./migrations
 
 # Create non-root user
 RUN adduser -D -u 1000 appuser

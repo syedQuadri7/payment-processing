@@ -112,7 +112,7 @@ test-integration: test-up
 	@echo "Waiting for services to be ready..."
 	@sleep 5
 	DATABASE_URL="postgres://payment_test:payment_test_secret@localhost:5433/payment_processing_test?sslmode=disable" \
-		go test -v ./internal/repository/... -run TestIntegration
+		go test -v ./shared/repository/... -run TestIntegration
 	$(MAKE) test-down
 
 # =============================================================================

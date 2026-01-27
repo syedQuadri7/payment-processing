@@ -14,12 +14,12 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"go.temporal.io/sdk/client"
 
-	"payment-processing/internal/adapter"
-	"payment-processing/internal/outbox"
-	"payment-processing/internal/repository"
-	"payment-processing/server"
-	"payment-processing/server/handlers"
-	"payment-processing/server/middleware"
+	"payment-processing/shared/adapter"
+	"payment-processing/shared/outbox"
+	"payment-processing/shared/repository"
+	"payment-processing/services/payment-api"
+	"payment-processing/services/payment-api/internal/handlers"
+	"payment-processing/services/payment-api/internal/middleware"
 )
 
 const version = "0.1.0"
