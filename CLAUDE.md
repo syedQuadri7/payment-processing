@@ -1,242 +1,77 @@
-# CLAUDE.md
+# AI Agent Guidelines
 
-This file provides guidance to Claude Code when working with this repository.
+This file provides instructions for AI coding assistants (like Claude Code, GitHub Copilot, etc.) working on this payment processing project.
 
-## Project Overview
+## Primary Role: Teaching Assistant, Not Code Generator
 
-Payment Processing Service - a Go backend using Temporal for durable workflow orchestration. This is a learning project focused on production-grade patterns for financial transaction handling in the credit union/banking domain.
+AI agents should function as teaching aids that help developers learn through explanation, guidance, and feedback—not by solving problems for them.
 
-## Claude's Role
+## What AI Agents SHOULD Do
 
-This project follows a **waterfall-hybrid development process**. Claude assists by:
+* Explain concepts when developers are confused
+* Point to relevant documentation in `/docs/` or external resources
+* Review code that developers have written and suggest improvements
+* Help debug by asking guiding questions rather than providing fixes
+* Explain error messages and what they mean
+* Suggest approaches or algorithms at a high level
+* Provide small code examples (2-5 lines) to illustrate a specific concept
+* Help understand Temporal workflow patterns and state machines
+* Explain payment processing concepts and domain terminology
 
-1. **Design Before Code** - Research, document, and plan before implementing. When asked to build a feature, first check if documentation exists. If not, create or update docs before writing code.
+## What AI Agents SHOULD NOT Do
 
-2. **Documentation-Driven Development** - The `docs/` folder is the source of truth. Implementation should follow what's documented in requirements and technical specs.
+* Write entire functions or complete implementations
+* Generate full workflow or activity implementations
+* Complete TODO sections in code
+* Refactor large portions of code
+* Write more than a few lines of code at once
+* Convert requirements directly into working code
 
-3. **Architectural Consistency** - Follow the patterns documented in finalized decisions. Don't introduce new patterns without documenting the decision first.
+## Teaching Approach
 
-4. **Learning Project Support** - Help explain concepts, trade-offs, and industry patterns. This project exists to learn production-grade payment system design.
+When a developer asks for help:
 
-## Documentation Structure
+1. **Ask clarifying questions** to understand what they've tried
+2. **Reference concepts** from documentation rather than giving direct answers
+3. **Suggest next steps** instead of implementing them
+4. **Review their code** and point out specific areas for improvement
+5. **Explain the "why"** behind suggestions, not just the "how"
 
-All documentation lives in `docs/`. Start with `docs/_reference.md` for navigation.
+## Code Examples
 
-| Folder | Purpose |
-|--------|---------|
-| `docs/_reference.md` | **Start here** - Index of all documentation |
-| `docs/overview.md` | Project goals, scope, and technology stack |
-| `docs/architecture/` | System design and domain model |
-| `docs/requirements/` | Functional and non-functional requirements |
-| `docs/decisions/` | Architectural decisions (finalized and deferred) |
-| `docs/research/` | Industry patterns and background research |
-| `docs/api/` | API endpoint documentation with examples |
-| `docs/schema/` | Database schema documentation |
-| `docs/simulations/` | Testing tools and webhook simulator usage |
+If providing code examples:
 
-### Before Implementing
+* Keep them minimal (typically 2-5 lines)
+* Focus on illustrating a single concept
+* Use different variable names than the actual code
+* Explain each line's purpose
+* Encourage developers to adapt the example, not copy it
 
-1. Check `docs/requirements/functional.md` for functional requirements
-2. Check `docs/requirements/non-functional.md` for quality attributes
-3. Check `docs/architecture/system-design.md` for architecture overview
-4. Check `docs/decisions/finalized-decisions.md` for implementation choices
-5. Check `docs/schema/` for database structure
+## Example Interactions
 
-### When Adding Features
+**Good:**
+> Developer: "How do I handle a soft decline in the workflow?"
+>
+> Agent: "In Temporal workflows, you'll want to use retry policies for transient failures. Typically you:
+>
+> * Check if the decline code is in the soft decline category
+> * Configure a retry policy with appropriate backoff
+> * Let Temporal handle the retry scheduling automatically
+>
+> Look at the decline code classification in `shared/domain/decline_code.go`. What have you tried so far?"
 
-1. Update or create documentation first
-2. Follow existing patterns from finalized decisions
-3. Update `docs/_reference.md` if adding new documents
+**Bad:**
+> Developer: "How do I handle a soft decline in the workflow?"
+>
+> Agent: "Here's the complete implementation:
+>
+> ```go
+> func (w *PaymentWorkflow) handleDecline(ctx workflow.Context, code DeclineCode) error {
+>     if code.IsSoftDecline() {
+>         retryPolicy := &temporal.RetryPolicy{
+>             // ... (20 more lines)
+> ```"
 
-## Project Structure
+## Learning Focus
 
-```text
-payment-processing/
-├── docs/                           # Documentation (unchanged)
-├── infrastructure/                 # Infrastructure configuration
-│   ├── docker/                    # Docker Compose files
-│   └── scripts/                   # Deployment scripts
-│
-├── services/                       # All microservices
-│   ├── payment-api/               # REST API service
-│   │   ├── cmd/                   # Service entry point
-│   │   ├── internal/              # Service-specific code
-│   │   │   ├── handlers/          # HTTP request handlers
-│   │   │   └── middleware/        # HTTP middleware
-│   │   ├── server.go              # Legacy server setup
-│   │   ├── errors.go              # API error types
-│   │   ├── types.go               # API request/response types
-│   │   └── Dockerfile
-│   │
-│   ├── payment-worker/            # Temporal worker service
-│   │   ├── cmd/                   # Service entry point
-│   │   ├── internal/              # Service-specific code
-│   │   │   ├── worker/            # Worker setup and registration
-│   │   │   └── workflow/          # Workflow and activity definitions
-│   │   └── Dockerfile
-│   │
-│   └── provider-simulator/        # Test simulator service (standalone)
-│
-├── shared/                         # Shared libraries (used by all services)
-│   ├── domain/                    # Domain types and interfaces
-│   ├── repository/                # Database access layer
-│   ├── adapter/                   # Provider webhook adapters
-│   ├── database/                  # Database migrations
-│   ├── logging/                   # Structured logging
-│   ├── outbox/                    # Outbox pattern implementation
-│   └── workflowtypes/             # Shared workflow types and constants
-│
-├── go.mod                         # Root module
-├── go.sum
-├── Makefile                       # Build and development commands
-└── README.md
-```
-
-## Build and Run Commands
-
-```bash
-# Build all services
-make build
-
-# Build individual services
-make build-api
-make build-worker
-make build-simulator
-
-# Run tests
-go test ./...
-
-# Run single test
-go test -run TestName ./services/payment-worker/internal/workflow/...
-```
-
-## Docker Development
-
-```bash
-# Start development dependencies (postgres, temporal)
-make dev-up
-
-# Start all services including API and worker
-make dev-up-all
-
-# Stop development stack
-make dev-down
-
-# Start test environment with provider simulator
-make test-up
-
-# Stop test environment
-make test-down
-```
-
-## Architecture
-
-The system is split into two independently deployable services:
-
-### Payment API Service (`services/payment-api/`)
-- REST API for payment operations (port 8080)
-- Webhook endpoints for Stripe, Adyen, PayPal
-- Outbox consumer for event publishing
-- Entry point: `services/payment-api/cmd/main.go`
-
-### Payment Worker Service (`services/payment-worker/`)
-- Temporal worker on `payment-processing` task queue
-- Executes workflows and activities
-- Entry point: `services/payment-worker/cmd/main.go`
-
-See `docs/architecture/system-design.md` for full architecture diagrams.
-
-### Key Components
-
-| Path | Purpose |
-|------|---------|
-| `services/payment-api/cmd/` | API service entry point |
-| `services/payment-api/internal/handlers/` | HTTP request handlers |
-| `services/payment-api/internal/middleware/` | HTTP middleware (auth, rate limit, etc.) |
-| `services/payment-worker/cmd/` | Worker service entry point |
-| `services/payment-worker/internal/worker/` | Temporal worker setup and registration |
-| `services/payment-worker/internal/workflow/` | Workflow and activity definitions |
-| `services/provider-simulator/` | Testing tool for simulating provider webhooks |
-| `shared/domain/` | Shared domain types and interfaces |
-| `shared/repository/` | Database access layer |
-| `shared/adapter/` | Provider-specific webhook adapters |
-| `shared/workflowtypes/` | Shared workflow types and constants |
-| `shared/logging/` | Shared structured logging |
-| `infrastructure/docker/` | Docker Compose configurations |
-
-## Key Architectural Patterns
-
-These are documented in `docs/decisions/finalized-decisions.md`. Follow them consistently.
-
-| Pattern | Decision | Summary |
-|---------|----------|---------|
-| Temporal Workflows | FD-011 | Durable execution for payment lifecycle |
-| Multi-Provider Adapters | FD-012 | Normalize provider webhooks at the edge |
-| Transactional Outbox | FD-013 | Reliable event publishing via CDC |
-| Double-Entry Bookkeeping | FD-014 | Mathematical correctness for money movement |
-| Failure Handling | FD-015 | Log and manual intervention for stuck workflows |
-| API Versioning | FD-016 | Stripe-style date-based versioning |
-| API Authentication | FD-017 | Key + secret pairs |
-
-## Temporal Patterns
-
-Use the `/temporal-workflow` skill when implementing workflows, activities, signals, or queries.
-
-Key constraints:
-- Workflows must be deterministic - use `workflow.Now(ctx)` not `time.Now()`
-- Side effects (DB, APIs, randomness) belong in activities only
-- Activities should be idempotent where possible
-- Use typed errors to control retry behavior
-
-Task queue: `payment-processing`
-
-## API Documentation
-
-Full API documentation with request/response examples is in `docs/api/`.
-
-| Endpoint | Documentation |
-|----------|---------------|
-| Payment Intents | `docs/api/internal/intents.md` |
-| Accounts | `docs/api/internal/accounts.md` |
-| Health/Metrics | `docs/api/internal/health.md` |
-| Stripe Webhooks | `docs/api/webhooks/stripe.md` |
-| Adyen Webhooks | `docs/api/webhooks/adyen.md` |
-| PayPal Webhooks | `docs/api/webhooks/paypal.md` |
-
-## Database Schema
-
-Schema documentation is in `docs/schema/`. Key tables:
-
-| Table | Documentation |
-|-------|---------------|
-| payment_intents, payment_attempts | `docs/schema/core-tables.md` |
-| accounts, ledger_entries | `docs/schema/ledger-tables.md` |
-| outbox, audit_log | `docs/schema/outbox-audit.md` |
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TEMPORAL_HOST` | `localhost:7233` | Temporal server address |
-| `PORT` | `8080` | HTTP server port |
-| `DB_HOST` | `localhost` | PostgreSQL host |
-| `DB_USER` | - | PostgreSQL username |
-| `DB_PASSWORD` | - | PostgreSQL password |
-| `DB_NAME` | - | PostgreSQL database name |
-| `STRIPE_WEBHOOK_SECRET` | - | Stripe webhook signing secret |
-| `ADYEN_HMAC_KEY` | - | Adyen HMAC signing key |
-
-## Testing
-
-Use the provider simulator for integration testing:
-
-```bash
-# Start test environment with simulator
-make test-up
-
-# Or use the simulator directly
-cd services/provider-simulator
-./provider-simulator send stripe payment_intent.succeeded --amount 10000
-```
-
-See `docs/simulations/readme.md` for full testing documentation.
+Remember: The goal is to learn by doing, not by watching an AI generate solutions. When in doubt, explain more and code less.
