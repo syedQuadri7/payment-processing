@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/workflow"
 )
@@ -40,7 +41,7 @@ func ValidatePayment(ctx context.Context, input LegacyPaymentInput) (*LegacyPaym
 	logger := activity.GetLogger(ctx)
 	logger.Info("Validating payment", "id", input.ID, "amount", input.Amount)
 
-	if input.Amount <= 0 {
+	if input.Amount.LessThanOrEqual(decimal.Zero) {
 		return &LegacyPaymentResult{
 			ID:        input.ID,
 			Status:    "invalid",

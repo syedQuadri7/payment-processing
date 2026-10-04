@@ -12,13 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopspring/decimal"
-
 	"payment-processing/shared/domain"
 )
 
 const (
-	stripeSignatureHeader = "Stripe-Signature"
+	stripeSignatureHeader    = "Stripe-Signature"
 	stripeTimestampTolerance = 5 * time.Minute // Reject timestamps older than 5 minutes
 )
 
@@ -113,8 +111,7 @@ func (a *StripeAdapter) ParseWebhook(ctx context.Context, headers http.Header, b
 
 	// Set amount and currency
 	if dataObject.Amount > 0 {
-		// Stripe amounts are in smallest currency unit
-		amount := decimal.NewFromInt(dataObject.Amount).Div(decimal.NewFromInt(100))
+		amount := dataObject.Amount
 		canonicalEvent.Amount = &amount
 		canonicalEvent.Currency = strings.ToUpper(dataObject.Currency)
 	}
@@ -149,7 +146,7 @@ func (a *StripeAdapter) ParseWebhook(ctx context.Context, headers http.Header, b
 			canonicalEvent.DisputeID = &disputeEvent.ID
 			canonicalEvent.DisputeReason = &disputeEvent.Reason
 			if disputeEvent.Amount > 0 {
-				disputeAmount := decimal.NewFromInt(disputeEvent.Amount).Div(decimal.NewFromInt(100))
+				disputeAmount := disputeEvent.Amount
 				canonicalEvent.DisputeAmount = &disputeAmount
 			}
 		}
@@ -214,11 +211,11 @@ func mapStripeDeclineType(declineCode string) domain.DeclineType {
 
 	// Hard declines - not retry eligible
 	hardDeclines := map[string]bool{
-		"expired_card":        true,
-		"incorrect_cvc":       true,
-		"invalid_number":      true,
-		"card_not_supported":  true,
-		"invalid_expiry_year": true,
+		"expired_card":         true,
+		"incorrect_cvc":        true,
+		"invalid_number":       true,
+		"card_not_supported":   true,
+		"invalid_expiry_year":  true,
 		"invalid_expiry_month": true,
 	}
 
@@ -257,13 +254,13 @@ type stripeEventData struct {
 }
 
 type stripeDataObject struct {
-	ID               string            `json:"id"`
-	Amount           int64             `json:"amount"`
-	Currency         string            `json:"currency"`
-	Status           string            `json:"status"`
-	Metadata         map[string]string `json:"metadata"`
+	ID               string              `json:"id"`
+	Amount           int64               `json:"amount"`
+	Currency         string              `json:"currency"`
+	Status           string              `json:"status"`
+	Metadata         map[string]string   `json:"metadata"`
 	LastPaymentError *stripePaymentError `json:"last_payment_error"`
-	LatestCharge     string            `json:"latest_charge"`
+	LatestCharge     string              `json:"latest_charge"`
 }
 
 type stripePaymentError struct {

@@ -3,8 +3,6 @@ package domain
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/shopspring/decimal"
 )
 
 // CanonicalEventType represents normalized webhook event types
@@ -50,12 +48,11 @@ type CanonicalEvent struct {
 	PaymentIntentID   *string `json:"payment_intent_id,omitempty"`
 	ProviderPaymentID string  `json:"provider_payment_id"`
 
-	// Event data
-	Amount       *decimal.Decimal `json:"amount,omitempty"`
-	Currency     string           `json:"currency,omitempty"`
-	DeclineCode  *string          `json:"decline_code,omitempty"`
-	DeclineType  *DeclineType     `json:"decline_type,omitempty"`
-	ErrorMessage *string          `json:"error_message,omitempty"`
+	Amount       *int64       `json:"amount,omitempty"`
+	Currency     string       `json:"currency,omitempty"`
+	DeclineCode  *string      `json:"decline_code,omitempty"`
+	DeclineType  *DeclineType `json:"decline_type,omitempty"`
+	ErrorMessage *string      `json:"error_message,omitempty"`
 
 	// Authorization details (for auth events)
 	AuthorizationCode *string    `json:"authorization_code,omitempty"`
@@ -63,12 +60,12 @@ type CanonicalEvent struct {
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
 
 	// Capture details
-	CapturedAmount *decimal.Decimal `json:"captured_amount,omitempty"`
+	CapturedAmount *int64 `json:"captured_amount,omitempty"`
 
 	// Dispute details
-	DisputeID     *string          `json:"dispute_id,omitempty"`
-	DisputeReason *string          `json:"dispute_reason,omitempty"`
-	DisputeAmount *decimal.Decimal `json:"dispute_amount,omitempty"`
+	DisputeID     *string `json:"dispute_id,omitempty"`
+	DisputeReason *string `json:"dispute_reason,omitempty"`
+	DisputeAmount *int64  `json:"dispute_amount,omitempty"`
 
 	// Metadata
 	RawPayload json.RawMessage `json:"raw_payload"` // Original webhook payload
@@ -122,16 +119,16 @@ func (e *CanonicalEvent) RequiresAction() bool {
 // ProviderEventMapping maps provider event types to canonical types
 var ProviderEventMapping = map[Provider]map[string]CanonicalEventType{
 	ProviderStripe: {
-		"payment_intent.succeeded":       EventAuthorizationSucceeded,
-		"payment_intent.payment_failed":  EventAuthorizationFailed,
-		"charge.captured":                EventCaptureSucceeded,
-		"charge.failed":                  EventCaptureFailed,
-		"charge.refunded":                EventRefundSucceeded,
-		"charge.refund_updated":          EventRefundSucceeded,
-		"charge.dispute.created":         EventDisputeOpened,
-		"charge.dispute.closed":          EventDisputeClosed,
-		"charge.dispute.updated":         EventDisputeUpdated,
-		"payment_intent.canceled":        EventVoidSucceeded,
+		"payment_intent.succeeded":      EventAuthorizationSucceeded,
+		"payment_intent.payment_failed": EventAuthorizationFailed,
+		"charge.captured":               EventCaptureSucceeded,
+		"charge.failed":                 EventCaptureFailed,
+		"charge.refunded":               EventRefundSucceeded,
+		"charge.refund_updated":         EventRefundSucceeded,
+		"charge.dispute.created":        EventDisputeOpened,
+		"charge.dispute.closed":         EventDisputeClosed,
+		"charge.dispute.updated":        EventDisputeUpdated,
+		"payment_intent.canceled":       EventVoidSucceeded,
 	},
 	ProviderAdyen: {
 		"AUTHORISATION":       EventAuthorizationSucceeded, // success field determines actual outcome

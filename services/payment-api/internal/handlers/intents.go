@@ -8,13 +8,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
 	"go.temporal.io/sdk/client"
 
-	"payment-processing/shared/domain"
-	"payment-processing/shared/workflowtypes"
 	"payment-processing/services/payment-api"
 	"payment-processing/services/payment-api/internal/middleware"
+	"payment-processing/shared/domain"
+	"payment-processing/shared/workflowtypes"
 )
 
 // PaymentIntentRepository defines the interface for payment intent storage
@@ -103,8 +102,7 @@ func (h *IntentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse amount
-	amount, _ := decimal.NewFromString(req.Amount) // Already validated
+	amount := req.Amount
 
 	// Determine capture method
 	captureMethod := domain.CaptureMethodAutomatic
@@ -325,13 +323,10 @@ func (h *IntentHandler) Capture(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate capture amount if provided
-	if req.Amount != nil && *req.Amount != "" {
-		captureAmount, _ := decimal.NewFromString(*req.Amount)
-		if captureAmount.GreaterThan(pi.Amount) {
-			server.WriteError(w, server.NewBusinessRuleError("amount_exceeds_authorized",
-				"Capture amount cannot exceed authorized amount"), requestID)
-			return
-		}
+	if req.Amount != nil && req.Amount.GreaterThan(pi.Amount) {
+		server.WriteError(w, server.NewBusinessRuleError("amount_exceeds_authorized",
+			"Capture amount cannot exceed authorized amount"), requestID)
+		return
 	}
 
 	// For manual capture, we need to trigger the capture through the workflow
@@ -507,18 +502,18 @@ func (h *IntentHandler) GetHold(w http.ResponseWriter, r *http.Request) {
 // toPaymentIntentResponse converts a domain payment intent to API response
 func (h *IntentHandler) toPaymentIntentResponse(pi *domain.PaymentIntent, hold *domain.AuthorizationHold) *server.PaymentIntentResponse {
 	resp := &server.PaymentIntentResponse{
-		ID:              pi.ID,
-		Status:          string(pi.Status),
-		Amount:          pi.Amount.String(),
-		Currency:        pi.Currency,
-		CustomerID:      pi.CustomerID,
-		Provider:        string(pi.Provider),
-		CaptureMethod:   string(pi.CaptureMethod),
-		PaymentMethodID: pi.PaymentMethodID,
+		ID:                pi.ID,
+		Status:            string(pi.Status),
+		Amount:            pi.Amount,
+		Currency:          pi.Currency,
+		CustomerID:        pi.CustomerID,
+		Provider:          string(pi.Provider),
+		CaptureMethod:     string(pi.CaptureMethod),
+		PaymentMethodID:   pi.PaymentMethodID,
 		ProviderPaymentID: pi.ProviderPaymentID,
-		IdempotencyKey:  pi.IdempotencyKey,
-		CreatedAt:       pi.CreatedAt,
-		UpdatedAt:       pi.UpdatedAt,
+		IdempotencyKey:    pi.IdempotencyKey,
+		CreatedAt:         pi.CreatedAt,
+		UpdatedAt:         pi.UpdatedAt,
 	}
 
 	if pi.WorkflowID != nil {
@@ -571,7 +566,7 @@ func (h *IntentHandler) toPaymentAttemptResponse(pa *domain.PaymentAttempt) serv
 func (h *IntentHandler) toHoldResponse(hold *domain.AuthorizationHold) *server.HoldResponse {
 	resp := &server.HoldResponse{
 		ID:        hold.ID,
-		Amount:    hold.Amount.String(),
+		Amount:    hold.Amount,
 		Status:    string(hold.Status),
 		ExpiresAt: hold.ExpiresAt,
 		CreatedAt: hold.CreatedAt,
@@ -583,4 +578,3 @@ func (h *IntentHandler) toHoldResponse(hold *domain.AuthorizationHold) *server.H
 
 	return resp
 }
-

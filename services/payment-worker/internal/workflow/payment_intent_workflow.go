@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
@@ -463,7 +464,10 @@ func handleWebhookEvent(ctx workflow.Context, event *domain.CanonicalEvent, stat
 	case domain.EventCaptureSucceeded:
 		if state.Status == domain.PaymentIntentStatusAuthorized {
 			state.Status = domain.PaymentIntentStatusCaptured
-			state.CapturedAmount = event.CapturedAmount
+			if event.CapturedAmount != nil {
+				captured := decimal.NewFromInt(*event.CapturedAmount)
+				state.CapturedAmount = &captured
+			}
 			capturedAt := workflow.Now(ctx)
 			state.CapturedAt = &capturedAt
 		}

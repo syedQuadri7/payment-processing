@@ -84,7 +84,7 @@ type PaymentWorkflowResult struct {
 
 type LegacyPaymentInput struct {
 	ID     string  `json:"id"`
-	Amount float64 `json:"amount"`
+	Amount decimal.Decimal `json:"amount"`
 	From   string  `json:"from"`
 	To     string  `json:"to"`
 }

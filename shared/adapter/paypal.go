@@ -167,7 +167,8 @@ func (a *PayPalAdapter) ParseWebhook(ctx context.Context, headers http.Header, b
 	// Set amount and currency
 	if event.Resource.Amount.Value != "" {
 		if amount, err := decimal.NewFromString(event.Resource.Amount.Value); err == nil {
-			canonicalEvent.Amount = &amount
+			minor := amount.Mul(decimal.NewFromInt(100)).IntPart()
+			canonicalEvent.Amount = &minor
 			canonicalEvent.Currency = strings.ToUpper(event.Resource.Amount.CurrencyCode)
 		}
 	}
@@ -199,7 +200,8 @@ func (a *PayPalAdapter) ParseWebhook(ctx context.Context, headers http.Header, b
 		}
 		if event.Resource.DisputeAmount.Value != "" {
 			if disputeAmount, err := decimal.NewFromString(event.Resource.DisputeAmount.Value); err == nil {
-				canonicalEvent.DisputeAmount = &disputeAmount
+				minor := disputeAmount.Mul(decimal.NewFromInt(100)).IntPart()
+				canonicalEvent.DisputeAmount = &minor
 			}
 		}
 	}

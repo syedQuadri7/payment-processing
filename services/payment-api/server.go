@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"go.temporal.io/sdk/client"
 
 	"payment-processing/shared/workflowtypes"
@@ -22,9 +23,9 @@ func New(c client.Client) *Server {
 }
 
 type PaymentRequest struct {
-	Amount float64 `json:"amount"`
-	From   string  `json:"from"`
-	To     string  `json:"to"`
+	Amount decimal.Decimal `json:"amount"`
+	From   string          `json:"from"`
+	To     string          `json:"to"`
 }
 
 type PaymentResponse struct {

@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopspring/decimal"
-
 	"payment-processing/shared/domain"
 )
 
@@ -126,8 +124,7 @@ func (a *AdyenAdapter) parseNotificationItem(item adyenNotificationItem, rawPayl
 
 	// Set amount and currency
 	if item.Amount.Value > 0 {
-		// Adyen amounts are in smallest currency unit
-		amount := decimal.NewFromInt(item.Amount.Value).Div(decimal.NewFromInt(100))
+		amount := item.Amount.Value
 		canonicalEvent.Amount = &amount
 		canonicalEvent.Currency = strings.ToUpper(item.Amount.Currency)
 	}
@@ -158,7 +155,7 @@ func (a *AdyenAdapter) parseNotificationItem(item adyenNotificationItem, rawPayl
 			canonicalEvent.DisputeReason = &item.Reason
 		}
 		if item.Amount.Value > 0 {
-			disputeAmount := decimal.NewFromInt(item.Amount.Value).Div(decimal.NewFromInt(100))
+			disputeAmount := item.Amount.Value
 			canonicalEvent.DisputeAmount = &disputeAmount
 		}
 	}
@@ -208,14 +205,14 @@ func (a *AdyenAdapter) mapEventType(eventCode string, success string) domain.Can
 func mapAdyenDeclineType(reason string) domain.DeclineType {
 	// Hard declines - not retry eligible (check these first for specificity)
 	hardDeclines := map[string]bool{
-		"Refused:33": true, // Card expired
-		"Refused:14": true, // Invalid number
-		"Refused:82": true, // Invalid CVV
-		"Refused:62": true, // Card restricted
-		"Refused:63": true, // Card restricted
-		"Expired Card": true,
+		"Refused:33":          true, // Card expired
+		"Refused:14":          true, // Invalid number
+		"Refused:82":          true, // Invalid CVV
+		"Refused:62":          true, // Card restricted
+		"Refused:63":          true, // Card restricted
+		"Expired Card":        true,
 		"Invalid Card Number": true,
-		"CVC Declined": true,
+		"CVC Declined":        true,
 	}
 
 	// Fraud declines (check before soft for specificity)
@@ -229,11 +226,11 @@ func mapAdyenDeclineType(reason string) domain.DeclineType {
 
 	// Soft declines - retry eligible
 	softDeclines := map[string]bool{
-		"Refused:51":  true, // Insufficient funds
-		"Refused:05":  true, // Generic decline
-		"Refused:57":  true, // Do not honor
-		"Refused:91":  true, // Try again
-		"Refused:96":  true, // Processing error
+		"Refused:51": true, // Insufficient funds
+		"Refused:05": true, // Generic decline
+		"Refused:57": true, // Do not honor
+		"Refused:91": true, // Try again
+		"Refused:96": true, // Processing error
 	}
 
 	// Check for exact matches first for specific codes
@@ -280,17 +277,17 @@ type adyenNotificationContainer struct {
 }
 
 type adyenNotificationItem struct {
-	EventCode         string            `json:"eventCode"`
-	Success           string            `json:"success"`
-	PspReference      string            `json:"pspReference"`
-	OriginalReference string            `json:"originalReference,omitempty"`
-	MerchantReference string            `json:"merchantReference"`
-	MerchantAccountCode string          `json:"merchantAccountCode"`
-	Amount            adyenAmount       `json:"amount"`
-	Reason            string            `json:"reason,omitempty"`
-	EventDate         string            `json:"eventDate"`
-	AdditionalData    map[string]string `json:"additionalData,omitempty"`
-	Operations        []string          `json:"operations,omitempty"`
+	EventCode           string            `json:"eventCode"`
+	Success             string            `json:"success"`
+	PspReference        string            `json:"pspReference"`
+	OriginalReference   string            `json:"originalReference,omitempty"`
+	MerchantReference   string            `json:"merchantReference"`
+	MerchantAccountCode string            `json:"merchantAccountCode"`
+	Amount              adyenAmount       `json:"amount"`
+	Reason              string            `json:"reason,omitempty"`
+	EventDate           string            `json:"eventDate"`
+	AdditionalData      map[string]string `json:"additionalData,omitempty"`
+	Operations          []string          `json:"operations,omitempty"`
 }
 
 type adyenAmount struct {

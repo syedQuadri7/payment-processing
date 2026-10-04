@@ -24,7 +24,7 @@ const (
 
 // CreatePaymentIntentRequest represents a request to create a payment intent
 type CreatePaymentIntentRequest struct {
-	Amount          string            `json:"amount"`
+	Amount          decimal.Decimal   `json:"amount"`
 	Currency        string            `json:"currency"`
 	CustomerID      string            `json:"customer_id"`
 	Provider        string            `json:"provider"`
@@ -35,15 +35,7 @@ type CreatePaymentIntentRequest struct {
 
 // Validate validates the create payment intent request
 func (r *CreatePaymentIntentRequest) Validate() *APIError {
-	if r.Amount == "" {
-		return NewValidationError("amount", "amount is required")
-	}
-
-	amount, err := decimal.NewFromString(r.Amount)
-	if err != nil {
-		return NewValidationError("amount", "amount must be a valid decimal")
-	}
-	if amount.LessThanOrEqual(decimal.Zero) {
+	if r.Amount.LessThanOrEqual(decimal.Zero) {
 		return NewValidationError("amount", "amount must be greater than zero")
 	}
 
@@ -132,33 +124,33 @@ func validateMetadata(metadata map[string]string) *APIError {
 
 // PaymentIntentResponse represents a payment intent in API responses
 type PaymentIntentResponse struct {
-	ID                string             `json:"id"`
-	Status            string             `json:"status"`
-	Amount            string             `json:"amount"`
-	Currency          string             `json:"currency"`
-	CustomerID        string             `json:"customer_id"`
-	Provider          string             `json:"provider"`
-	CaptureMethod     string             `json:"capture_method"`
-	PaymentMethodID   *string            `json:"payment_method_id,omitempty"`
-	ProviderPaymentID *string            `json:"provider_payment_id,omitempty"`
-	WorkflowID        string             `json:"workflow_id"`
-	IdempotencyKey    string             `json:"idempotency_key"`
-	Metadata          map[string]string  `json:"metadata,omitempty"`
-	CreatedAt         time.Time          `json:"created_at"`
-	UpdatedAt         time.Time          `json:"updated_at"`
-	AuthorizedAt      *time.Time         `json:"authorized_at,omitempty"`
-	CapturedAt        *time.Time         `json:"captured_at,omitempty"`
-	Hold              *HoldResponse      `json:"hold,omitempty"`
+	ID                string            `json:"id"`
+	Status            string            `json:"status"`
+	Amount            decimal.Decimal   `json:"amount"`
+	Currency          string            `json:"currency"`
+	CustomerID        string            `json:"customer_id"`
+	Provider          string            `json:"provider"`
+	CaptureMethod     string            `json:"capture_method"`
+	PaymentMethodID   *string           `json:"payment_method_id,omitempty"`
+	ProviderPaymentID *string           `json:"provider_payment_id,omitempty"`
+	WorkflowID        string            `json:"workflow_id"`
+	IdempotencyKey    string            `json:"idempotency_key"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+	AuthorizedAt      *time.Time        `json:"authorized_at,omitempty"`
+	CapturedAt        *time.Time        `json:"captured_at,omitempty"`
+	Hold              *HoldResponse     `json:"hold,omitempty"`
 }
 
 // HoldResponse represents an authorization hold in API responses
 type HoldResponse struct {
-	ID                string    `json:"id"`
-	Amount            string    `json:"amount"`
-	Status            string    `json:"status"`
-	AuthorizationCode string    `json:"authorization_code,omitempty"`
-	ExpiresAt         time.Time `json:"expires_at"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                string          `json:"id"`
+	Amount            decimal.Decimal `json:"amount"`
+	Status            string          `json:"status"`
+	AuthorizationCode string          `json:"authorization_code,omitempty"`
+	ExpiresAt         time.Time       `json:"expires_at"`
+	CreatedAt         time.Time       `json:"created_at"`
 }
 
 // AttachPaymentMethodRequest represents a request to attach a payment method
@@ -176,19 +168,13 @@ func (r *AttachPaymentMethodRequest) Validate() *APIError {
 
 // CapturePaymentRequest represents a request to capture a payment
 type CapturePaymentRequest struct {
-	Amount *string `json:"amount,omitempty"` // Optional for partial capture
+	Amount *decimal.Decimal `json:"amount,omitempty"`
 }
 
 // Validate validates the capture payment request
 func (r *CapturePaymentRequest) Validate() *APIError {
-	if r.Amount != nil && *r.Amount != "" {
-		amount, err := decimal.NewFromString(*r.Amount)
-		if err != nil {
-			return NewValidationError("amount", "amount must be a valid decimal")
-		}
-		if amount.LessThanOrEqual(decimal.Zero) {
-			return NewValidationError("amount", "amount must be greater than zero")
-		}
+	if r.Amount != nil && r.Amount.LessThanOrEqual(decimal.Zero) {
+		return NewValidationError("amount", "amount must be greater than zero")
 	}
 	return nil
 }
@@ -200,15 +186,15 @@ type CancelPaymentRequest struct {
 
 // PaymentAttemptResponse represents a payment attempt in API responses
 type PaymentAttemptResponse struct {
-	ID              string     `json:"id"`
-	AttemptNumber   int        `json:"attempt_number"`
-	Status          string     `json:"status"`
-	Provider        string     `json:"provider"`
-	CanonicalCode   *string    `json:"canonical_decline_code,omitempty"`
-	DeclineType     *string    `json:"decline_type,omitempty"`
-	ProcessorTxnID  *string    `json:"processor_txn_id,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	ID             string     `json:"id"`
+	AttemptNumber  int        `json:"attempt_number"`
+	Status         string     `json:"status"`
+	Provider       string     `json:"provider"`
+	CanonicalCode  *string    `json:"canonical_decline_code,omitempty"`
+	DeclineType    *string    `json:"decline_type,omitempty"`
+	ProcessorTxnID *string    `json:"processor_txn_id,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
 }
 
 // AttemptsListResponse represents a list of payment attempts
@@ -219,26 +205,26 @@ type AttemptsListResponse struct {
 
 // AccountResponse represents an account in API responses
 type AccountResponse struct {
-	ID               string    `json:"id"`
-	Type             string    `json:"type"`
-	Name             string    `json:"name"`
-	Currency         string    `json:"currency"`
-	LedgerBalance    string    `json:"ledger_balance"`
-	PendingBalance   string    `json:"pending_balance"`
-	AvailableBalance string    `json:"available_balance"`
-	Status           string    `json:"status"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               string          `json:"id"`
+	Type             string          `json:"type"`
+	Name             string          `json:"name"`
+	Currency         string          `json:"currency"`
+	LedgerBalance    decimal.Decimal `json:"ledger_balance"`
+	PendingBalance   decimal.Decimal `json:"pending_balance"`
+	AvailableBalance decimal.Decimal `json:"available_balance"`
+	Status           string          `json:"status"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 // LedgerEntryResponse represents a ledger entry in API responses
 type LedgerEntryResponse struct {
-	ID             string    `json:"id"`
-	JournalEntryID string    `json:"journal_entry_id"`
-	Amount         string    `json:"amount"`
-	Direction      string    `json:"direction"`
-	BalanceAfter   string    `json:"balance_after"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string          `json:"id"`
+	JournalEntryID string          `json:"journal_entry_id"`
+	Amount         decimal.Decimal `json:"amount"`
+	Direction      string          `json:"direction"`
+	BalanceAfter   decimal.Decimal `json:"balance_after"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
 // LedgerEntriesListResponse represents a paginated list of ledger entries
@@ -250,10 +236,10 @@ type LedgerEntriesListResponse struct {
 
 // HealthResponse represents a health check response
 type HealthResponse struct {
-	Status      string                 `json:"status"`
-	Version     string                 `json:"version,omitempty"`
-	Checks      map[string]CheckResult `json:"checks,omitempty"`
-	Timestamp   time.Time              `json:"timestamp"`
+	Status    string                 `json:"status"`
+	Version   string                 `json:"version,omitempty"`
+	Checks    map[string]CheckResult `json:"checks,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
 }
 
 // CheckResult represents the result of a health check
