@@ -253,26 +253,8 @@ type stripeEventData struct {
 	Object json.RawMessage `json:"object"`
 }
 
-type stripeDataObject struct {
-	ID               string              `json:"id"`
-	Amount           int64               `json:"amount"`
-	Currency         string              `json:"currency"`
-	Status           string              `json:"status"`
-	Metadata         map[string]string   `json:"metadata"`
-	LastPaymentError *stripePaymentError `json:"last_payment_error"`
-	LatestCharge     string              `json:"latest_charge"`
-}
-
 type stripePaymentError struct {
 	Code        string `json:"code"`
 	DeclineCode string `json:"decline_code"`
 	Message     string `json:"message"`
-}
-
-type stripeDisputeEvent struct {
-	ID       string `json:"id"`
-	Amount   int64  `json:"amount"`
-	Currency string `json:"currency"`
-	Reason   string `json:"reason"`
-	Status   string `json:"status"`
 }

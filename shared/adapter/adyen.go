@@ -289,8 +289,3 @@ type adyenNotificationItem struct {
 	AdditionalData      map[string]string `json:"additionalData,omitempty"`
 	Operations          []string          `json:"operations,omitempty"`
 }
-
-type adyenAmount struct {
-	Currency string `json:"currency"`
-	Value    int64  `json:"value"`
-}

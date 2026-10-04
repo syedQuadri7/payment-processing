@@ -1,10 +1,5 @@
 package domain
 
-import (
-	"encoding/json"
-	"time"
-)
-
 // CanonicalEventType represents normalized webhook event types
 // All provider-specific events are mapped to these canonical types
 type CanonicalEventType string
@@ -34,44 +29,6 @@ const (
 	// Expiration events
 	EventAuthorizationExpired CanonicalEventType = "AUTHORIZATION_EXPIRED"
 )
-
-// CanonicalEvent represents a normalized webhook event from any provider
-// This is the internal representation that workflows receive
-type CanonicalEvent struct {
-	// Event identification
-	ID            string             `json:"id"`
-	Type          CanonicalEventType `json:"type"`
-	Provider      Provider           `json:"provider"`
-	ProviderEvent string             `json:"provider_event"` // Original event type
-
-	// Payment reference
-	PaymentIntentID   *string `json:"payment_intent_id,omitempty"`
-	ProviderPaymentID string  `json:"provider_payment_id"`
-
-	Amount       *int64       `json:"amount,omitempty"`
-	Currency     string       `json:"currency,omitempty"`
-	DeclineCode  *string      `json:"decline_code,omitempty"`
-	DeclineType  *DeclineType `json:"decline_type,omitempty"`
-	ErrorMessage *string      `json:"error_message,omitempty"`
-
-	// Authorization details (for auth events)
-	AuthorizationCode *string    `json:"authorization_code,omitempty"`
-	NetworkTxnID      *string    `json:"network_txn_id,omitempty"`
-	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
-
-	// Capture details
-	CapturedAmount *int64 `json:"captured_amount,omitempty"`
-
-	// Dispute details
-	DisputeID     *string `json:"dispute_id,omitempty"`
-	DisputeReason *string `json:"dispute_reason,omitempty"`
-	DisputeAmount *int64  `json:"dispute_amount,omitempty"`
-
-	// Metadata
-	RawPayload json.RawMessage `json:"raw_payload"` // Original webhook payload
-	ReceivedAt time.Time       `json:"received_at"`
-	Timestamp  time.Time       `json:"timestamp"` // Provider's event timestamp
-}
 
 // IsSuccess returns true if this is a successful event
 func (e *CanonicalEvent) IsSuccess() bool {
